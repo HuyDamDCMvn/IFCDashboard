@@ -1,0 +1,46 @@
+---
+description: IFC Dashboard project architecture and tech stack
+alwaysApply: true
+---
+
+# IFC Dashboard Architecture
+
+## Tech Stack
+
+- **Frontend**: React (Vite), Three.js, `@thatopen/components` + `@thatopen/components-front`
+- **Backend**: Python FastAPI (IFC parsing via `ifcopenshell`)
+- **3D Engine**: That Open fragments (tile-based), PostproductionRenderer with SimpleRenderer fallback
+
+## Project Structure
+
+```
+frontend/
+  src/
+    components/
+      IfcViewer.jsx      — 3D viewer (That Open engine)
+      Dashboard.jsx      — Charts and stats
+      ElementTable.jsx   — Element data table
+    contexts/
+      SelectionContext.jsx — Shared state: selection, filters, isolation
+    App.jsx              — Layout, file upload, routing
+  public/
+    Worker/worker.mjs    — FragmentsManager worker (copied from @thatopen/fragments)
+    web-ifc.wasm         — WASM binary (copied from web-ifc)
+    web-ifc-mt.wasm      — Multi-threaded WASM binary
+backend/
+  main.py                — FastAPI server, IFC parsing endpoint
+TestIFC/                 — buildingSMART test files (IFC4, IFC4x3)
+```
+
+## Key Patterns
+
+- **Bi-directional linking**: Dashboard click → `toggleFilter(expressIDs, label, key, globalIds)` → viewer isolates
+- **Viewer click → Dashboard**: Highlighter event → GUID → `guidToExpress` map → `setSelectedExpressID`
+- **Isolation modes**: highlight, isolate, xray (via Hider + Highlighter)
+- **Context API**: `SelectionProvider` shares filter state across all components
+
+## Dev Environment
+
+- WASM files served from `public/` to avoid CDN/CORS issues
+- FragmentsManager worker loaded as Blob URL
+- No COOP/COEP headers (forces web-ifc single-thread, avoids worker path issues)

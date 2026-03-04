@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useSelection } from "../contexts/SelectionContext";
 
 export default function ElementTable({ elements }) {
   const [search, setSearch] = useState("");
@@ -6,6 +7,8 @@ export default function ElementTable({ elements }) {
   const [page, setPage] = useState(0);
   const [expandedRow, setExpandedRow] = useState(null);
   const pageSize = 50;
+
+  const { selectedExpressID, filterKey, toggleFilter } = useSelection();
 
   const types = useMemo(() => {
     const set = new Set(elements.map((e) => e.type));
@@ -18,7 +21,7 @@ export default function ElementTable({ elements }) {
       const matchSearch =
         !search ||
         el.name.toLowerCase().includes(search.toLowerCase()) ||
-        el.id.toLowerCase().includes(search.toLowerCase()) ||
+        String(el.expressId).includes(search) ||
         el.type.toLowerCase().includes(search.toLowerCase());
       return matchType && matchSearch;
     });
@@ -27,38 +30,43 @@ export default function ElementTable({ elements }) {
   const paged = filtered.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(filtered.length / pageSize);
 
+  const handleLocate = useCallback(
+    (el) => {
+      const key = `element:${el.expressId}`;
+      const label = `${el.name || el.type.replace("Ifc", "")}`;
+      const globalIds = el.id ? [el.id] : [];
+      toggleFilter([el.expressId], label, key, globalIds);
+    },
+    [toggleFilter]
+  );
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <div
+        style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}
+      >
         <input
           type="text"
           placeholder="Search by name, ID, or type..."
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-          style={{
-            flex: 1,
-            minWidth: 200,
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #ddd",
-            fontSize: 14,
-            outline: "none",
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
           }}
+          style={inputStyle}
         />
         <select
           value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value); setPage(0); }}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #ddd",
-            fontSize: 14,
-            background: "#fff",
-            cursor: "pointer",
+          onChange={(e) => {
+            setTypeFilter(e.target.value);
+            setPage(0);
           }}
+          style={selectStyle}
         >
           {types.map((t) => (
-            <option key={t} value={t}>{t === "All" ? "All Types" : t.replace("Ifc", "")}</option>
+            <option key={t} value={t}>
+              {t === "All" ? "All Types" : t.replace("Ifc", "")}
+            </option>
           ))}
         </select>
       </div>
@@ -68,7 +76,9 @@ export default function ElementTable({ elements }) {
       </div>
 
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table
+          style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
+        >
           <thead>
             <tr style={{ background: "#f8f9fa", textAlign: "left" }}>
               <th style={thStyle}>Type</th>
@@ -76,17 +86,23 @@ export default function ElementTable({ elements }) {
               <th style={thStyle}>Storey</th>
               <th style={thStyle}>Materials</th>
               <th style={thStyle}>Props</th>
+              <th style={{ ...thStyle, width: 48 }}></th>
             </tr>
           </thead>
           <tbody>
             {paged.map((el, i) => (
               <ElementRow
-                key={el.id + i}
+                key={el.expressId ?? el.id + i}
                 el={el}
-                isExpanded={expandedRow === el.id}
+                isExpanded={expandedRow === el.expressId}
+                isSelected={selectedExpressID === el.expressId}
+                isFiltered={filterKey === `element:${el.expressId}`}
                 onToggle={() =>
-                  setExpandedRow(expandedRow === el.id ? null : el.id)
+                  setExpandedRow(
+                    expandedRow === el.expressId ? null : el.expressId
+                  )
                 }
+                onLocate={() => handleLocate(el)}
               />
             ))}
           </tbody>
@@ -126,11 +142,26 @@ export default function ElementTable({ elements }) {
   );
 }
 
-function ElementRow({ el, isExpanded, onToggle }) {
+function ElementRow({
+  el,
+  isExpanded,
+  isSelected,
+  isFiltered,
+  onToggle,
+  onLocate,
+}) {
   const propCount = Object.values(el.propertySets || {}).reduce(
     (acc, pset) => acc + Object.keys(pset).length,
     0
   );
+
+  const rowBg = isFiltered
+    ? "#fff3e0"
+    : isSelected
+      ? "#e8f0fe"
+      : isExpanded
+        ? "#f0f4ff"
+        : "transparent";
 
   return (
     <>
@@ -139,40 +170,57 @@ function ElementRow({ el, isExpanded, onToggle }) {
         style={{
           cursor: "pointer",
           borderBottom: "1px solid #f0f0f0",
-          background: isExpanded ? "#f0f4ff" : "transparent",
+          background: rowBg,
           transition: "background 0.15s",
         }}
         onMouseEnter={(e) => {
-          if (!isExpanded) e.currentTarget.style.background = "#fafafa";
+          if (!isExpanded && !isSelected && !isFiltered)
+            e.currentTarget.style.background = "#fafafa";
         }}
         onMouseLeave={(e) => {
-          if (!isExpanded) e.currentTarget.style.background = "transparent";
+          e.currentTarget.style.background = rowBg;
         }}
       >
         <td style={tdStyle}>
-          <span
-            style={{
-              background: "#e8eaf6",
-              color: "#3949ab",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 500,
-            }}
-          >
-            {el.type.replace("Ifc", "")}
-          </span>
+          <span style={typeBadgeStyle}>{el.type.replace("Ifc", "")}</span>
         </td>
         <td style={tdStyle}>{el.name || "-"}</td>
         <td style={tdStyle}>{el.storey || "-"}</td>
         <td style={tdStyle}>{el.materials?.join(", ") || "-"}</td>
         <td style={tdStyle}>{propCount}</td>
+        <td style={tdStyle}>
+          <button
+            title="Locate in 3D viewer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onLocate();
+            }}
+            style={{
+              background: isFiltered ? "#ff6600" : "#e8eaf6",
+              color: isFiltered ? "#fff" : "#3949ab",
+              border: "none",
+              borderRadius: 6,
+              padding: "4px 8px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              transition: "all 0.15s",
+            }}
+          >
+            3D
+          </button>
+        </td>
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={5} style={{ padding: "12px 16px", background: "#f8f9ff" }}>
+          <td
+            colSpan={6}
+            style={{ padding: "12px 16px", background: "#f8f9ff" }}
+          >
             <div style={{ fontSize: 12, color: "#555" }}>
               <strong>GlobalId:</strong> {el.id}
+              {" | "}
+              <strong>ExpressID:</strong> {el.expressId}
               {el.description && (
                 <>
                   <br />
@@ -216,6 +264,25 @@ function ElementRow({ el, isExpanded, onToggle }) {
   );
 }
 
+const inputStyle = {
+  flex: 1,
+  minWidth: 200,
+  padding: "8px 14px",
+  borderRadius: 8,
+  border: "1px solid #ddd",
+  fontSize: 14,
+  outline: "none",
+};
+
+const selectStyle = {
+  padding: "8px 14px",
+  borderRadius: 8,
+  border: "1px solid #ddd",
+  fontSize: 14,
+  background: "#fff",
+  cursor: "pointer",
+};
+
 const thStyle = {
   padding: "10px 12px",
   fontWeight: 600,
@@ -228,6 +295,15 @@ const thStyle = {
 
 const tdStyle = {
   padding: "10px 12px",
+};
+
+const typeBadgeStyle = {
+  background: "#e8eaf6",
+  color: "#3949ab",
+  padding: "2px 8px",
+  borderRadius: 4,
+  fontSize: 12,
+  fontWeight: 500,
 };
 
 const btnStyle = {

@@ -26,3 +26,15 @@ frontend/public/*.wasm
 # Logs
 *.log
 npm-debug.log*
+
+# Large IFC files (>10MB)
+TestIFC/HG--_ASS_430_5-_FA-_T1_0000_-_GE.ifc
+
+# Test screenshots/output
+frontend/*-output/
+frontend/*-screenshots/
+
+# Browser test scripts (debug/e2e)
+frontend/debug-*.js
+frontend/e2e-*.js
+frontend/test-*.js

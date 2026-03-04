@@ -1,0 +1,42 @@
+---
+description: IFC/openBIM standards and conventions per buildingSMART
+globs: "**/*.{ifc,jsx,js,py}"
+alwaysApply: false
+---
+
+# IFC / openBIM Standards
+
+Reference: https://github.com/buildingsmart-community and https://standards.buildingsmart.org/
+
+## Supported IFC Schemas
+
+Must support these schemas (per buildingSMART certification):
+- **IFC2x3** — legacy, widely used
+- **IFC4** (4.0.2.1) — current standard
+- **IFC4x3** (IFC4X3_ADD2) — infrastructure extensions (rail, road, bridge)
+
+## Key IFC Concepts
+
+- **GlobalId** (GUID): 22-char base64 identifier, unique across models
+- **ExpressID**: Integer, local to a single IFC file (not portable)
+- **IfcBuildingStorey**: Spatial structure for floor-based classification
+- **IfcRelContainedInSpatialStructure**: Links elements to storeys
+- **IfcRelDefinesByProperties**: Links property sets to elements
+
+## GUID ↔ ExpressID Bridge
+
+Dashboard uses ExpressID (from backend parser). 3D viewer uses GUIDs (That Open's ModelIdMap).
+Always maintain a `guidToExpress` map when bridging dashboard ↔ viewer:
+
+```javascript
+const guidToExpress = new Map();
+for (const el of dashboardData.elements) {
+  if (el.id) guidToExpress.set(el.id, el.expressId);
+}
+```
+
+## Testing
+
+Test with official buildingSMART files from `TestIFC/`:
+- Architecture, Structural, Infrastructure (Road, Rail)
+- Multiple schemas (IFC4, IFC4x3)

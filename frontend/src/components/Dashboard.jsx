@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   BarChart,
   Bar,
@@ -10,10 +11,10 @@ import {
   ResponsiveContainer,
   Legend,
   CartesianGrid,
-  Treemap,
 } from "recharts";
 import StatCard from "./StatCard";
 import ElementTable from "./ElementTable";
+import { useSelection } from "../contexts/SelectionContext";
 
 const COLORS = [
   "#4f46e5", "#06b6d4", "#10b981", "#f59e0b", "#ef4444",
@@ -21,7 +22,42 @@ const COLORS = [
   "#84cc16", "#e11d48",
 ];
 
+const ACTIVE_COLOR = "#ff6600";
+
 export default function Dashboard({ data }) {
+  const { filterKey, toggleFilter } = useSelection();
+
+  const handleFilterClick = useCallback(
+    (category, value) => {
+      if (!data?.elements) return;
+
+      const key = `${category}:${value}`;
+      let matching;
+
+      switch (category) {
+        case "type":
+          matching = data.elements.filter((el) => el.type === value);
+          break;
+        case "storey":
+          matching = data.elements.filter((el) => el.storey === value);
+          break;
+        case "material":
+          matching = data.elements.filter((el) =>
+            el.materials?.some((m) => m.startsWith(value))
+          );
+          break;
+        default:
+          return;
+      }
+
+      const expressIDs = matching.map((el) => el.expressId);
+      const globalIds = matching.map((el) => el.id).filter(Boolean);
+      const label = `${value.replace("Ifc", "")} (${expressIDs.length})`;
+      toggleFilter(expressIDs, label, key, globalIds);
+    },
+    [data, toggleFilter]
+  );
+
   if (!data) return null;
 
   const chartData = Object.entries(data.summary)
@@ -85,7 +121,7 @@ export default function Dashboard({ data }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
           gap: 16,
           marginBottom: 28,
         }}
@@ -125,17 +161,12 @@ export default function Dashboard({ data }) {
           marginBottom: 28,
         }}
       >
-        {/* Bar Chart */}
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 20,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            border: "1px solid #f0f0f0",
-          }}
-        >
-          <h3 style={chartTitleStyle}>Element Count by Type</h3>
+        {/* Bar Chart - Element types */}
+        <div style={chartCardStyle}>
+          <h3 style={chartTitleStyle}>
+            Element Count by Type
+            <span style={chartHintStyle}>click to filter</span>
+          </h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} margin={{ left: -10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -148,35 +179,36 @@ export default function Dashboard({ data }) {
               />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip
-                contentStyle={{
-                  borderRadius: 8,
-                  border: "1px solid #eee",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                }}
+                contentStyle={tooltipStyle}
               />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                {chartData.map((_, i) => (
-                  <Cell
-                    key={i}
-                    fill={COLORS[i % COLORS.length]}
-                  />
-                ))}
+              <Bar
+                dataKey="value"
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(entry) => handleFilterClick("type", entry.fullName)}
+              >
+                {chartData.map((entry, i) => {
+                  const isActive = filterKey === `type:${entry.fullName}`;
+                  return (
+                    <Cell
+                      key={i}
+                      fill={isActive ? ACTIVE_COLOR : COLORS[i % COLORS.length]}
+                      stroke={isActive ? "#cc5200" : "transparent"}
+                      strokeWidth={isActive ? 2 : 0}
+                    />
+                  );
+                })}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Pie Chart */}
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 20,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            border: "1px solid #f0f0f0",
-          }}
-        >
-          <h3 style={chartTitleStyle}>Element Distribution</h3>
+        {/* Pie Chart - Distribution */}
+        <div style={chartCardStyle}>
+          <h3 style={chartTitleStyle}>
+            Element Distribution
+            <span style={chartHintStyle}>click to filter</span>
+          </h3>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie
@@ -188,14 +220,24 @@ export default function Dashboard({ data }) {
                 outerRadius={90}
                 innerRadius={45}
                 paddingAngle={2}
+                cursor="pointer"
+                onClick={(entry) => handleFilterClick("type", entry.fullName)}
                 label={({ name, percent }) =>
                   `${name} ${(percent * 100).toFixed(0)}%`
                 }
                 labelLine={{ stroke: "#ccc" }}
               >
-                {chartData.slice(0, 8).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
+                {chartData.slice(0, 8).map((entry, i) => {
+                  const isActive = filterKey === `type:${entry.fullName}`;
+                  return (
+                    <Cell
+                      key={i}
+                      fill={isActive ? ACTIVE_COLOR : COLORS[i % COLORS.length]}
+                      stroke={isActive ? "#cc5200" : "transparent"}
+                      strokeWidth={isActive ? 3 : 0}
+                    />
+                  );
+                })}
               </Pie>
               <Tooltip />
             </PieChart>
@@ -214,16 +256,11 @@ export default function Dashboard({ data }) {
       >
         {/* Materials */}
         {materialData.length > 0 && (
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              padding: 20,
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-              border: "1px solid #f0f0f0",
-            }}
-          >
-            <h3 style={chartTitleStyle}>Materials Used</h3>
+          <div style={chartCardStyle}>
+            <h3 style={chartTitleStyle}>
+              Materials Used
+              <span style={chartHintStyle}>click to filter</span>
+            </h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart
                 data={materialData}
@@ -239,7 +276,25 @@ export default function Dashboard({ data }) {
                   width={80}
                 />
                 <Tooltip />
-                <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                <Bar
+                  dataKey="value"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(entry) =>
+                    handleFilterClick("material", entry.name)
+                  }
+                >
+                  {materialData.map((entry, i) => {
+                    const isActive =
+                      filterKey === `material:${entry.name}`;
+                    return (
+                      <Cell
+                        key={i}
+                        fill={isActive ? ACTIVE_COLOR : "#8b5cf6"}
+                      />
+                    );
+                  })}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -247,16 +302,11 @@ export default function Dashboard({ data }) {
 
         {/* Storey Breakdown */}
         {storeyData.length > 0 && (
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              padding: 20,
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-              border: "1px solid #f0f0f0",
-            }}
-          >
-            <h3 style={chartTitleStyle}>Elements by Storey</h3>
+          <div style={chartCardStyle}>
+            <h3 style={chartTitleStyle}>
+              Elements by Storey
+              <span style={chartHintStyle}>click to filter</span>
+            </h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={storeyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -277,6 +327,10 @@ export default function Dashboard({ data }) {
                     stackId="a"
                     fill={COLORS[i % COLORS.length]}
                     name={type.replace("Ifc", "")}
+                    cursor="pointer"
+                    onClick={(entry) =>
+                      handleFilterClick("storey", entry.name)
+                    }
                   />
                 ))}
               </BarChart>
@@ -287,50 +341,47 @@ export default function Dashboard({ data }) {
 
       {/* Storey List */}
       {data.storeys?.length > 0 && (
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 20,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            border: "1px solid #f0f0f0",
-            marginBottom: 28,
-          }}
-        >
+        <div style={chartCardStyle}>
           <h3 style={chartTitleStyle}>Building Storeys</h3>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {data.storeys.map((s, i) => (
-              <div
-                key={i}
-                style={{
-                  background: "#f0f4ff",
-                  borderRadius: 8,
-                  padding: "10px 16px",
-                  fontSize: 13,
-                }}
-              >
-                <div style={{ fontWeight: 600, color: "#3949ab" }}>
-                  {s.name}
+            {data.storeys.map((s, i) => {
+              const isActive = filterKey === `storey:${s.name}`;
+              return (
+                <div
+                  key={i}
+                  onClick={() => handleFilterClick("storey", s.name)}
+                  style={{
+                    background: isActive ? "#fff3e0" : "#f0f4ff",
+                    borderRadius: 8,
+                    padding: "10px 16px",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    border: isActive
+                      ? "2px solid #ff6600"
+                      : "2px solid transparent",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      color: isActive ? "#cc5200" : "#3949ab",
+                    }}
+                  >
+                    {s.name}
+                  </div>
+                  <div style={{ color: "#888", fontSize: 12 }}>
+                    Elevation: {s.elevation}m
+                  </div>
                 </div>
-                <div style={{ color: "#888", fontSize: 12 }}>
-                  Elevation: {s.elevation}m
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Elements Table */}
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 20,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-          border: "1px solid #f0f0f0",
-        }}
-      >
+      <div style={{ ...chartCardStyle, marginTop: 28 }}>
         <h3 style={chartTitleStyle}>All Elements</h3>
         <ElementTable elements={data.elements} />
       </div>
@@ -338,9 +389,33 @@ export default function Dashboard({ data }) {
   );
 }
 
+const chartCardStyle = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 20,
+  boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+  border: "1px solid #f0f0f0",
+};
+
 const chartTitleStyle = {
   margin: "0 0 16px 0",
   fontSize: 15,
   fontWeight: 600,
   color: "#333",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+
+const chartHintStyle = {
+  fontSize: 11,
+  fontWeight: 400,
+  color: "#bbb",
+  fontStyle: "italic",
+};
+
+const tooltipStyle = {
+  borderRadius: 8,
+  border: "1px solid #eee",
+  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
 };

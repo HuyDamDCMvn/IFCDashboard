@@ -1,0 +1,54 @@
+---
+description: That Open Engine component patterns and conventions
+globs: frontend/src/**/*.{jsx,js}
+alwaysApply: false
+---
+
+# That Open Engine Patterns
+
+Follow official patterns from https://github.com/ThatOpen/engine_components
+
+## World Setup
+
+```javascript
+const components = new OBC.Components();
+const worlds = components.get(OBC.Worlds);
+const world = worlds.create();
+world.scene = new OBC.SimpleScene(components);
+world.scene.setup(); // sets up lights
+world.renderer = new OBC.SimpleRenderer(components, container);
+world.camera = new OBC.SimpleCamera(components);
+components.get(OBC.Grids).create(world);
+components.init();
+```
+
+## FragmentsManager (required before IfcLoader)
+
+- Init with blob URL worker: fetch `/Worker/worker.mjs` → `URL.createObjectURL(blob)`
+- Hook camera updates: `world.camera.controls.addEventListener("update", () => fragments.core.update())`
+- Handle camera change: `world.onCameraChanged.add(cam => { for (const [,m] of fragments.list) m.useCamera(cam.three) })`
+- Connect models: `fragments.list.onItemSet.add(({ value: model }) => { model.useCamera(cam); scene.add(model.object) })`
+- Z-fighting fix: `material.polygonOffset = true` on non-LOD materials
+
+## Highlighter (requires Raycasters first)
+
+```javascript
+components.get(OBC.Raycasters).get(world); // MUST be before Highlighter
+const highlighter = components.get(OBCF.Highlighter);
+highlighter.setup({ world, selectMaterialDefinition: { color, opacity, transparent, renderedFaces } });
+```
+
+## Data Structures
+
+- `ModelIdMap` = `Record<string, Set<number>>` (modelId → local IDs)
+- Convert GUIDs: `fragments.guidsToModelIdMap(guids)`
+- Convert local IDs to GUIDs: `model.getGuidsByLocalIds([...localIds])`
+
+## Disposal
+
+- Use `fragments.core.disposeModel(modelId)` instead of manual `model.dispose()`
+
+## IFC Loading
+
+- Configure WASM: `loader.setup({ autoSetWasm: false, wasm: { path: "/", absolute: true } })`
+- Progress: `loader.load(buffer, true, name, { processData: { progressCallback: (pct) => {} } })`

@@ -1,0 +1,39 @@
+---
+description: Primary reference documentation and repositories for IFC Dashboard project
+alwaysApply: true
+---
+
+# Reference Documentation
+
+## Primary Repositories
+
+Always refer to these before implementing BIM/IFC features:
+
+1. **That Open Engine** — https://github.com/ThatOpen
+   - `engine_components` → `@thatopen/components`, `@thatopen/components-front`
+   - `engine_web-ifc` → `web-ifc` (WASM IFC parser)
+   - `engine_fragment` → `@thatopen/fragments` (tile-based rendering)
+   - Docs: https://docs.thatopen.com/
+   - Examples: https://github.com/ThatOpen/engine_components/tree/main/packages/core/src/fragments
+
+2. **buildingSMART Community** — https://github.com/buildingsmart-community
+   - `Community-Sample-Test-Files` → IFC/BCF/IDS test files
+   - `ifcJSON` → IFC.JSON specification
+   - Standards reference: https://standards.buildingsmart.org/
+
+3. **IfcOpenShell** — https://github.com/IfcOpenShell/IfcOpenShell
+   - `ifcopenshell-python` → Python library for IFC parsing (used by backend)
+   - `ifcconvert` → CLI to convert IFC to other formats
+   - `ifctester` → IDS model auditing
+   - `ifcclash` → Clash detection
+   - `ifcdiff` → Compare changes between IFC models
+   - `ifccsv` → Export/import schedules from IFC
+   - Supports: IFC2x3, IFC4, IFC4x1, IFC4x2, IFC4x3
+   - Docs: https://docs.ifcopenshell.org/
+   - Bonsai (Blender BIM): https://bonsaibim.org/
+
+## Test Files Source
+
+- Official: https://github.com/buildingSMART/Sample-Test-Files (IFC4, IFC4x3)
+- Community: https://github.com/buildingsmart-community/Community-Sample-Test-Files (IFC2x3, Git LFS)
+- Local: `TestIFC/` folder in project root
