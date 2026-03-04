@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Build
+frontend/dist/
+*.egg-info/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WASM (can be regenerated from node_modules)
+frontend/public/*.wasm
+
+# Logs
+*.log
+npm-debug.log*
