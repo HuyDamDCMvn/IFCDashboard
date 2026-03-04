@@ -18,11 +18,13 @@ export default function ElementTable({ elements }) {
   const filtered = useMemo(() => {
     return elements.filter((el) => {
       const matchType = typeFilter === "All" || el.type === typeFilter;
+      const q = search.toLowerCase();
       const matchSearch =
         !search ||
-        el.name.toLowerCase().includes(search.toLowerCase()) ||
+        el.name.toLowerCase().includes(q) ||
         String(el.expressId).includes(search) ||
-        el.type.toLowerCase().includes(search.toLowerCase());
+        el.type.toLowerCase().includes(q) ||
+        (el.predefinedType || "").toLowerCase().includes(q);
       return matchType && matchSearch;
     });
   }, [elements, typeFilter, search]);
@@ -81,7 +83,8 @@ export default function ElementTable({ elements }) {
         >
           <thead>
             <tr style={{ background: "#f8f9fa", textAlign: "left" }}>
-              <th style={thStyle}>Type</th>
+              <th style={thStyle}>Export As</th>
+              <th style={thStyle}>Predefined</th>
               <th style={thStyle}>Name</th>
               <th style={thStyle}>Storey</th>
               <th style={thStyle}>Materials</th>
@@ -184,6 +187,13 @@ function ElementRow({
         <td style={tdStyle}>
           <span style={typeBadgeStyle}>{el.type.replace("Ifc", "")}</span>
         </td>
+        <td style={tdStyle}>
+          {el.predefinedType ? (
+            <span style={predefBadgeStyle}>{el.predefinedType}</span>
+          ) : (
+            <span style={{ color: "#ccc" }}>-</span>
+          )}
+        </td>
         <td style={tdStyle}>{el.name || "-"}</td>
         <td style={tdStyle}>{el.storey || "-"}</td>
         <td style={tdStyle}>{el.materials?.join(", ") || "-"}</td>
@@ -214,7 +224,7 @@ function ElementRow({
       {isExpanded && (
         <tr>
           <td
-            colSpan={6}
+            colSpan={7}
             style={{ padding: "12px 16px", background: "#f8f9ff" }}
           >
             <div style={{ fontSize: 12, color: "#555" }}>
@@ -303,6 +313,15 @@ const typeBadgeStyle = {
   padding: "2px 8px",
   borderRadius: 4,
   fontSize: 12,
+  fontWeight: 500,
+};
+
+const predefBadgeStyle = {
+  background: "#fef3c7",
+  color: "#92400e",
+  padding: "2px 8px",
+  borderRadius: 4,
+  fontSize: 11,
   fontWeight: 500,
 };
 

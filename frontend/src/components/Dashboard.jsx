@@ -38,6 +38,14 @@ export default function Dashboard({ data }) {
         case "type":
           matching = data.elements.filter((el) => el.type === value);
           break;
+        case "predefinedType": {
+          const [exportAs, ...rest] = value.split(".");
+          const pType = rest.join(".");
+          matching = data.elements.filter(
+            (el) => el.type === exportAs && el.predefinedType === pType
+          );
+          break;
+        }
         case "storey":
           matching = data.elements.filter((el) => el.storey === value);
           break;
@@ -60,6 +68,9 @@ export default function Dashboard({ data }) {
 
   if (!data) return null;
 
+  const schema = data.schemaInfo || {};
+
+  // Export As (IFC class) chart
   const chartData = Object.entries(data.summary)
     .filter(([, count]) => count > 0)
     .map(([type, count]) => ({
@@ -68,6 +79,22 @@ export default function Dashboard({ data }) {
       value: count,
     }))
     .sort((a, b) => b.value - a.value);
+
+  // PredefinedType breakdown chart
+  const predefData = Object.entries(data.predefinedTypeSummary || {})
+    .map(([label, count]) => {
+      const [exportAs, ...rest] = label.split(".");
+      const pType = rest.join(".");
+      return {
+        name: `${exportAs.replace("Ifc", "")}.${pType}`,
+        fullLabel: label,
+        exportAs,
+        pType,
+        value: count,
+      };
+    })
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 15);
 
   const materialData = Object.entries(data.materialSummary || {})
     .map(([name, count]) => ({ name, value: count }))
@@ -103,17 +130,23 @@ export default function Dashboard({ data }) {
             fontSize: 22,
             fontWeight: 700,
             color: "#1a1a2e",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
           }}
         >
           {data.project.name || "IFC Project"}
+          {data.project.schema && (
+            <span style={schemaBadgeStyle}>{data.project.schema}</span>
+          )}
+          {schema.hasInfraTypes && (
+            <span style={{ ...schemaBadgeStyle, background: "#dcfce7", color: "#166534" }}>
+              Infrastructure
+            </span>
+          )}
         </h2>
         <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>
           {data.project.description}
-          {data.project.schema && (
-            <span style={{ marginLeft: 12, color: "#aaa" }}>
-              Schema: {data.project.schema}
-            </span>
-          )}
         </div>
       </div>
 
@@ -244,6 +277,58 @@ export default function Dashboard({ data }) {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* PredefinedType Breakdown */}
+      {predefData.length > 0 && (
+        <div style={{ ...chartCardStyle, marginBottom: 28 }}>
+          <h3 style={chartTitleStyle}>
+            Export As + PredefinedType
+            <span style={chartHintStyle}>click to filter</span>
+          </h3>
+          <ResponsiveContainer width="100%" height={Math.max(200, predefData.length * 28 + 40)}>
+            <BarChart
+              data={predefData}
+              layout="vertical"
+              margin={{ left: 120, right: 20 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis type="number" tick={{ fontSize: 11 }} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 11 }}
+                width={120}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                formatter={(val, name, props) => [
+                  val,
+                  `${props.payload.exportAs} → ${props.payload.pType}`,
+                ]}
+              />
+              <Bar
+                dataKey="value"
+                radius={[0, 4, 4, 0]}
+                cursor="pointer"
+                onClick={(entry) =>
+                  handleFilterClick("predefinedType", entry.fullLabel)
+                }
+              >
+                {predefData.map((entry, i) => {
+                  const isActive =
+                    filterKey === `predefinedType:${entry.fullLabel}`;
+                  return (
+                    <Cell
+                      key={i}
+                      fill={isActive ? ACTIVE_COLOR : COLORS[i % COLORS.length]}
+                    />
+                  );
+                })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* Second Row: Material + Storey */}
       <div
@@ -412,6 +497,16 @@ const chartHintStyle = {
   fontWeight: 400,
   color: "#bbb",
   fontStyle: "italic",
+};
+
+const schemaBadgeStyle = {
+  fontSize: 11,
+  fontWeight: 600,
+  background: "#eef2ff",
+  color: "#4338ca",
+  padding: "3px 10px",
+  borderRadius: 20,
+  letterSpacing: 0.5,
 };
 
 const tooltipStyle = {

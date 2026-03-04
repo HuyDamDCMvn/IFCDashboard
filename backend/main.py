@@ -14,29 +14,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TRACKED_TYPES = [
-    "IfcWall", "IfcWallStandardCase",
-    "IfcSlab",
-    "IfcColumn",
-    "IfcBeam",
-    "IfcDoor",
-    "IfcWindow",
-    "IfcStair", "IfcStairFlight",
-    "IfcRoof",
-    "IfcRailing",
-    "IfcCurtainWall",
-    "IfcPlate",
-    "IfcMember",
-    "IfcFooting",
-    "IfcPile",
-    "IfcBuildingElementProxy",
-    "IfcFurnishingElement",
-    "IfcFlowTerminal",
-    "IfcFlowSegment",
-    "IfcFlowFitting",
-    "IfcDistributionPort",
-    "IfcSpace",
-]
+
+IFC4X3_INFRA_TYPES = {
+    "IfcAlignment", "IfcAlignmentCant", "IfcAlignmentHorizontal",
+    "IfcAlignmentVertical", "IfcAlignmentSegment",
+    "IfcCourse", "IfcPavement", "IfcKerb",
+    "IfcRailway", "IfcRoad", "IfcBridge", "IfcBridgePart",
+    "IfcFacility", "IfcFacilityPart", "IfcFacilityPartCommon",
+    "IfcMarineFacility", "IfcNavigationElement",
+    "IfcLinearElement", "IfcReferent",
+    "IfcEarthworksCut", "IfcEarthworksFill", "IfcEarthworksElement",
+    "IfcGeomodel", "IfcGeotechnicalStratum", "IfcBorehole",
+    "IfcDeepFoundation", "IfcCaissonFoundation",
+    "IfcSignal", "IfcSign",
+    "IfcMobileTelecommunicationsAppliance",
+    "IfcDistributionBoard",
+}
+
+
+def get_predefined_type(product):
+    """Extract PredefinedType, falling back to ObjectType for USERDEFINED."""
+    ptype = getattr(product, "PredefinedType", None)
+    if ptype == "USERDEFINED":
+        return getattr(product, "ObjectType", None) or "USERDEFINED"
+    return ptype or ""
+
+
+def get_export_as(product, schema):
+    """Get the effective IFC export class.
+
+    For IFC2x3 legacy types like IfcWallStandardCase, normalize to the
+    base type (IfcWall) so charts are consistent across schemas.
+    """
+    ifc_class = product.is_a()
+    ifc2x3_aliases = {
+        "IfcWallStandardCase": "IfcWall",
+        "IfcSlabStandardCase": "IfcSlab",
+        "IfcDoorStandardCase": "IfcDoor",
+        "IfcWindowStandardCase": "IfcWindow",
+        "IfcColumnStandardCase": "IfcColumn",
+        "IfcBeamStandardCase": "IfcBeam",
+        "IfcMemberStandardCase": "IfcMember",
+        "IfcPlateStandardCase": "IfcPlate",
+        "IfcOpeningStandardCase": "IfcOpeningElement",
+    }
+    if schema and schema.startswith("IFC2"):
+        return ifc2x3_aliases.get(ifc_class, ifc_class)
+    return ifc_class
 
 
 def get_psets(product):
@@ -145,12 +169,8 @@ async def parse_ifc(file: UploadFile = File(...)):
         })
     storey_info.sort(key=lambda x: x["elevation"])
 
-    # Summary count by type
-    summary = {}
-    for entity_type in TRACKED_TYPES:
-        count = len(ifc.by_type(entity_type))
-        if count > 0:
-            summary[entity_type] = count
+    schema = ifc.schema  # IFC2X3, IFC4, IFC4X3_ADD2, etc.
+    is_ifc4x3 = "IFC4X3" in schema.upper() if schema else False
 
     # Elements by storey
     storey_breakdown = {}
@@ -160,6 +180,10 @@ async def parse_ifc(file: UploadFile = File(...)):
 
     # Detailed elements
     elements = []
+    summary = {}           # exportAs counts
+    predef_summary = {}    # predefinedType counts
+    export_predef = {}     # exportAs → { predefinedType → count }
+
     for product in ifc.by_type("IfcProduct"):
         if product.is_a("IfcOpeningElement"):
             continue
@@ -168,10 +192,15 @@ async def parse_ifc(file: UploadFile = File(...)):
         materials = get_materials(product)
         spatial = get_spatial_info(product)
 
+        export_as = get_export_as(product, schema)
+        predef = get_predefined_type(product)
+
         el = {
             "id": product.GlobalId,
             "expressId": product.id(),
-            "type": product.is_a(),
+            "type": export_as,
+            "rawType": product.is_a(),
+            "predefinedType": predef,
             "name": product.Name or "",
             "description": product.Description or "",
             "storey": spatial["storey"],
@@ -180,11 +209,25 @@ async def parse_ifc(file: UploadFile = File(...)):
         }
         elements.append(el)
 
+        # Summary by exportAs
+        summary[export_as] = summary.get(export_as, 0) + 1
+
+        # Summary by predefinedType
+        if predef:
+            label = f"{export_as}.{predef}"
+            predef_summary[label] = predef_summary.get(label, 0) + 1
+
+        # Cross-tab: exportAs → predefinedType breakdown
+        if export_as not in export_predef:
+            export_predef[export_as] = {}
+        pt_key = predef or "(none)"
+        export_predef[export_as][pt_key] = export_predef[export_as].get(pt_key, 0) + 1
+
+        # Storey breakdown
         storey_name = spatial["storey"] or "Unassigned"
         if storey_name not in storey_breakdown:
             storey_breakdown[storey_name] = {}
-        etype = product.is_a()
-        storey_breakdown[storey_name][etype] = storey_breakdown[storey_name].get(etype, 0) + 1
+        storey_breakdown[storey_name][export_as] = storey_breakdown[storey_name].get(export_as, 0) + 1
 
     # Material summary
     material_counts = {}
@@ -193,13 +236,27 @@ async def parse_ifc(file: UploadFile = File(...)):
             mat_name = mat.split(" (")[0]
             material_counts[mat_name] = material_counts.get(mat_name, 0) + 1
 
+    # Schema capabilities
+    schema_info = {
+        "schema": schema,
+        "isIfc4x3": is_ifc4x3,
+        "hasStoreys": len(storeys) > 0,
+        "hasMaterials": len(material_counts) > 0,
+        "hasInfraTypes": is_ifc4x3 and any(
+            t in summary for t in IFC4X3_INFRA_TYPES
+        ),
+    }
+
     return {
         "project": project_info,
         "buildings": building_info,
         "storeys": storey_info,
         "summary": summary,
+        "predefinedTypeSummary": predef_summary,
+        "exportPredefinedBreakdown": export_predef,
         "storeyBreakdown": storey_breakdown,
         "materialSummary": material_counts,
+        "schemaInfo": schema_info,
         "totalElements": len(elements),
         "elements": elements,
     }
