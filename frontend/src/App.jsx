@@ -1,19 +1,21 @@
 import { useState, useCallback, useMemo } from "react";
 import axios from "axios";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import IfcViewer from "./components/IfcViewer";
 import Dashboard from "./components/Dashboard";
 import SelectedElement from "./components/SelectedElement";
-import {
-  SelectionProvider,
-  useSelection,
-} from "./contexts/SelectionContext";
+import ModelManager from "./components/ModelManager";
+import { SelectionProvider, useSelection } from "./contexts/SelectionContext";
+import { ModelRegistryProvider, useModelRegistry } from "./contexts/ModelRegistryContext";
 
-const API_URL = "http://localhost:8000";
+const API_URL = "";
 
 function App() {
   return (
     <SelectionProvider>
-      <AppContent />
+      <ModelRegistryProvider>
+        <AppContent />
+      </ModelRegistryProvider>
     </SelectionProvider>
   );
 }
@@ -24,22 +26,18 @@ const ISOLATION_MODES = [
   { key: "xray", label: "X-Ray", desc: "Transparent non-matching elements" },
 ];
 
-const VIEW_MODES = [
-  { key: "split", label: "Split" },
-  { key: "viewer", label: "3D" },
-  { key: "dashboard", label: "Data" },
-];
-
 function AppContent() {
-  const [ifcFile, setIfcFile] = useState(null);
-  const [fileName, setFileName] = useState("");
-  const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [viewMode, setViewMode] = useState("split");
+  const [viewerCollapsed, setViewerCollapsed] = useState(false);
+  const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
+
+  const viewerPanelRef = usePanelRef();
+  const dashboardPanelRef = usePanelRef();
 
   const {
     selectedExpressID,
+    selectedModelId,
     filterExpressIDs,
     filterLabel,
     isolationMode,
@@ -47,105 +45,135 @@ function AppContent() {
     clearFilter,
   } = useSelection();
 
-  const handleFileUpload = useCallback(async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const { allModelsList, mergedData, addModel } = useModelRegistry();
 
-    setIfcFile(file);
-    setFileName(file.name);
+  const hasModels = allModelsList.length > 0;
+
+  const handleAddFiles = useCallback(async (files) => {
+    if (!files || files.length === 0) return;
+
     setError("");
     setLoading(true);
-    setDashboardData(null);
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const uploads = files.map(async (file) => {
+      const modelId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("model_id", modelId);
 
-    try {
-      const res = await axios.post(`${API_URL}/api/parse-ifc`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      setDashboardData(res.data);
-    } catch (err) {
-      console.error("Parse error:", err);
-      setError(
-        "Failed to parse IFC. Make sure the backend is running on port 8000."
-      );
-    }
+      try {
+        const res = await axios.post(`${API_URL}/api/parse-ifc`, formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        addModel(res.data.modelId || modelId, file.name, file, res.data);
+      } catch (err) {
+        console.error(`Parse error for ${file.name}:`, err);
+        setError((prev) =>
+          prev ? `${prev}\nFailed: ${file.name}` : `Failed to parse ${file.name}. Is the backend running?`
+        );
+      }
+    });
+
+    await Promise.all(uploads);
     setLoading(false);
-  }, []);
+  }, [addModel]);
+
+  const handleFileUpload = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) handleAddFiles(files);
+  }, [handleAddFiles]);
 
   const selectedElementInfo = useMemo(() => {
-    if (selectedExpressID == null || !dashboardData) return null;
-    return (
-      dashboardData.elements.find(
-        (el) => el.expressId === selectedExpressID
-      ) || null
-    );
-  }, [selectedExpressID, dashboardData]);
+    if (selectedExpressID == null || !mergedData) return null;
+    return mergedData.elements.find(
+      (el) => el.expressId === selectedExpressID && (!selectedModelId || el._modelId === selectedModelId)
+    ) || null;
+  }, [selectedExpressID, selectedModelId, mergedData]);
 
   const isFilterActive = filterExpressIDs && filterExpressIDs.length > 0;
 
+  const toggleViewer = useCallback(() => {
+    const panel = viewerPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [viewerPanelRef]);
+
+  const toggleDashboard = useCallback(() => {
+    const panel = dashboardPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [dashboardPanelRef]);
+
   return (
-    <div
-      style={{
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
-      }}
-    >
+    <div style={{
+      height: "100vh", display: "flex", flexDirection: "column",
+      fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
+    }}>
       {/* Header */}
       <header style={headerStyle}>
-        {/* Left: Logo + File */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={logoStyle}>IFC</div>
           <span style={{ color: "#fff", fontWeight: 600, fontSize: 16 }}>
             IFC Dashboard
           </span>
+          {allModelsList.length > 1 && (
+            <span style={{
+              fontSize: 10, fontWeight: 600, background: "rgba(255,255,255,0.15)",
+              color: "#a5b4fc", padding: "2px 8px", borderRadius: 10,
+            }}>
+              Federation ({allModelsList.length} models)
+            </span>
+          )}
         </div>
 
         <label style={fileButtonStyle}>
-          {fileName || "Open IFC File"}
+          {hasModels ? "+ Add IFC" : "Open IFC Files"}
           <input
             type="file"
             accept=".ifc"
+            multiple
             onChange={handleFileUpload}
             style={{ display: "none" }}
           />
         </label>
 
-        {/* Center: View Mode */}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
-          {VIEW_MODES.map((vm) => (
+        {/* Panel toggle controls */}
+        {hasModels && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
             <button
-              key={vm.key}
-              onClick={() => setViewMode(vm.key)}
+              onClick={toggleViewer}
               style={{
-                ...viewModeBtn,
-                background:
-                  viewMode === vm.key
-                    ? "rgba(255,255,255,0.2)"
-                    : "transparent",
-                color:
-                  viewMode === vm.key ? "#fff" : "rgba(255,255,255,0.6)",
+                ...panelToggleBtn,
+                background: viewerCollapsed ? "transparent" : "rgba(255,255,255,0.18)",
+                color: viewerCollapsed ? "rgba(255,255,255,0.4)" : "#fff",
               }}
+              title={viewerCollapsed ? "Show 3D Viewer" : "Hide 3D Viewer"}
             >
-              {vm.label}
+              3D View
             </button>
-          ))}
-        </div>
+            <button
+              onClick={toggleDashboard}
+              style={{
+                ...panelToggleBtn,
+                background: dashboardCollapsed ? "transparent" : "rgba(255,255,255,0.18)",
+                color: dashboardCollapsed ? "rgba(255,255,255,0.4)" : "#fff",
+              }}
+              title={dashboardCollapsed ? "Show Dashboard" : "Hide Dashboard"}
+            >
+              Dashboard
+            </button>
+          </div>
+        )}
 
-        {/* Right: Isolation Mode */}
-        <div
-          style={{
-            display: "flex",
-            gap: 2,
-            marginLeft: 12,
-            background: "rgba(255,255,255,0.08)",
-            borderRadius: 8,
-            padding: 2,
-          }}
-        >
+        {/* Isolation Mode */}
+        <div style={{
+          display: "flex", gap: 2,
+          marginLeft: hasModels ? 12 : "auto",
+          background: "rgba(255,255,255,0.08)",
+          borderRadius: 8, padding: 2,
+        }}>
           {ISOLATION_MODES.map((im) => (
             <button
               key={im.key}
@@ -153,14 +181,8 @@ function AppContent() {
               onClick={() => setIsolationMode(im.key)}
               style={{
                 ...isolationModeBtn,
-                background:
-                  isolationMode === im.key
-                    ? modeColor(im.key)
-                    : "transparent",
-                color:
-                  isolationMode === im.key
-                    ? "#fff"
-                    : "rgba(255,255,255,0.6)",
+                background: isolationMode === im.key ? modeColor(im.key) : "transparent",
+                color: isolationMode === im.key ? "#fff" : "rgba(255,255,255,0.6)",
               }}
             >
               {im.label}
@@ -174,15 +196,10 @@ function AppContent() {
         <div style={filterBarStyle}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={filterIconStyle}>&#9670;</span>
-            <span style={{ fontWeight: 600, color: "#cc5200" }}>
-              Filtering:
-            </span>
-            <span style={{ color: "#333" }}>
-              {filterLabel}
-            </span>
+            <span style={{ fontWeight: 600, color: "#cc5200" }}>Filtering:</span>
+            <span style={{ color: "#333" }}>{filterLabel}</span>
             <span style={{ color: "#999" }}>
-              ({filterExpressIDs.length}{" "}
-              {filterExpressIDs.length === 1 ? "element" : "elements"})
+              ({filterExpressIDs.length} {filterExpressIDs.length === 1 ? "element" : "elements"})
             </span>
           </div>
           <button onClick={clearFilter} style={clearFilterBtn}>
@@ -192,97 +209,110 @@ function AppContent() {
       )}
 
       {/* Main Content */}
-      <main style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {!ifcFile ? (
-          <EmptyState onFileSelect={handleFileUpload} />
+      <main style={{ flex: 1, overflow: "hidden" }}>
+        {!hasModels ? (
+          <EmptyState onFileSelect={handleFileUpload} loading={loading} error={error} />
         ) : (
-          <>
-            {/* Viewer Panel */}
-            {viewMode !== "dashboard" && (
-              <div
-                style={{
-                  width: viewMode === "viewer" ? "100%" : "50%",
-                  position: "relative",
-                  borderRight:
-                    viewMode === "split"
-                      ? "1px solid #e5e7eb"
-                      : "none",
-                  flexShrink: 0,
-                }}
-              >
-                <IfcViewer ifcFile={ifcFile} dashboardData={dashboardData} />
-                <SelectedElement element={selectedElementInfo} />
+          <div style={{ display: "flex", height: "100%" }}>
+            {/* Model Manager Sidebar */}
+            {allModelsList.length > 0 && (
+              <div style={{ width: 240, flexShrink: 0, overflow: "hidden" }}>
+                <ModelManager onAddFiles={handleAddFiles} />
               </div>
             )}
 
-            {/* Dashboard Panel */}
-            {viewMode !== "viewer" && (
-              <div
-                style={{
-                  flex: 1,
-                  overflow: "auto",
-                  background: "#f8f9fb",
-                }}
-              >
-                {loading && (
-                  <div style={{ padding: 40, textAlign: "center" }}>
-                    <div className="spinner" />
-                    <p style={{ color: "#888", marginTop: 16 }}>
-                      Parsing IFC data from server...
-                    </p>
+            {/* Main panels */}
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <Group orientation="horizontal" style={{ height: "100%" }}>
+                <Panel
+                  id="viewer"
+                  panelRef={viewerPanelRef}
+                  defaultSize="50%"
+                  minSize="15%"
+                  collapsible
+                  collapsedSize="0%"
+                  onResize={(size) => setViewerCollapsed(size.asPercentage < 1)}
+                >
+                  <div style={{ height: "100%", position: "relative" }}>
+                    <IfcViewer />
+                    <SelectedElement element={selectedElementInfo} />
                   </div>
-                )}
-                {error && (
-                  <div style={errorStyle}>{error}</div>
-                )}
-                <Dashboard data={dashboardData} />
-              </div>
-            )}
-          </>
+                </Panel>
+
+                <Separator className="resize-handle-outer" />
+
+                <Panel
+                  id="dashboard"
+                  panelRef={dashboardPanelRef}
+                  defaultSize="50%"
+                  minSize="15%"
+                  collapsible
+                  collapsedSize="0%"
+                  onResize={(size) => setDashboardCollapsed(size.asPercentage < 1)}
+                >
+                  <div style={{ height: "100%", overflow: "auto", background: "#f8f9fb" }}>
+                    {loading && (
+                      <div style={{ padding: 40, textAlign: "center" }}>
+                        <div className="spinner" />
+                        <p style={{ color: "#888", marginTop: 16 }}>
+                          Parsing IFC data from server...
+                        </p>
+                      </div>
+                    )}
+                    {error && <div style={errorStyle}>{error}</div>}
+                    <Dashboard data={mergedData} />
+                  </div>
+                </Panel>
+              </Group>
+            </div>
+          </div>
         )}
       </main>
     </div>
   );
 }
 
-function EmptyState({ onFileSelect }) {
+function EmptyState({ onFileSelect, loading, error }) {
   return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#f8f9fb",
-      }}
-    >
-      <div style={{ textAlign: "center", maxWidth: 400 }}>
+    <div style={{
+      flex: 1, display: "flex", alignItems: "center",
+      justifyContent: "center", background: "#f8f9fb", height: "100%",
+    }}>
+      <div style={{ textAlign: "center", maxWidth: 440 }}>
         <div style={{ ...logoStyle, width: 80, height: 80, borderRadius: 20, fontSize: 28, margin: "0 auto 24px" }}>
           IFC
         </div>
-        <h2
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            color: "#1a1a2e",
-            margin: "0 0 8px",
-          }}
-        >
+        <h2 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", margin: "0 0 8px" }}>
           IFC Dashboard
         </h2>
-        <p style={{ color: "#888", fontSize: 14, margin: "0 0 24px" }}>
-          Upload an IFC file to view the 3D model and explore building data
-          with interactive charts. Click any chart element to isolate it in 3D.
+        <p style={{ color: "#888", fontSize: 14, margin: "0 0 8px" }}>
+          Upload one or more IFC files to view 3D models and explore building data
+          with interactive charts. Load multiple files to federate models from
+          different disciplines.
         </p>
-        <label style={uploadBtnStyle}>
-          Open IFC File
-          <input
-            type="file"
-            accept=".ifc"
-            onChange={onFileSelect}
-            style={{ display: "none" }}
-          />
-        </label>
+        <p style={{ color: "#aaa", fontSize: 12, margin: "0 0 24px" }}>
+          Supports IFC2x3, IFC4, and IFC4x3. Select multiple files at once.
+        </p>
+
+        {loading ? (
+          <div style={{ padding: 20 }}>
+            <div className="spinner" />
+            <p style={{ color: "#888", marginTop: 12, fontSize: 13 }}>Parsing IFC files...</p>
+          </div>
+        ) : (
+          <label style={uploadBtnStyle}>
+            Open IFC Files
+            <input
+              type="file"
+              accept=".ifc"
+              multiple
+              onChange={onFileSelect}
+              style={{ display: "none" }}
+            />
+          </label>
+        )}
+
+        {error && <div style={{ ...errorStyle, marginTop: 20 }}>{error}</div>}
       </div>
     </div>
   );
@@ -290,14 +320,10 @@ function EmptyState({ onFileSelect }) {
 
 function modeColor(mode) {
   switch (mode) {
-    case "highlight":
-      return "rgba(255, 140, 0, 0.7)";
-    case "isolate":
-      return "rgba(79, 70, 229, 0.7)";
-    case "xray":
-      return "rgba(139, 92, 246, 0.7)";
-    default:
-      return "rgba(255,255,255,0.2)";
+    case "highlight": return "rgba(255, 140, 0, 0.7)";
+    case "isolate": return "rgba(79, 70, 229, 0.7)";
+    case "xray": return "rgba(139, 92, 246, 0.7)";
+    default: return "rgba(255,255,255,0.2)";
   }
 }
 
@@ -315,96 +341,58 @@ const headerStyle = {
 };
 
 const logoStyle = {
-  width: 32,
-  height: 32,
-  borderRadius: 8,
+  width: 32, height: 32, borderRadius: 8,
   background: "linear-gradient(135deg, #4f46e5, #06b6d4)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "#fff",
-  fontWeight: 800,
-  fontSize: 14,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  color: "#fff", fontWeight: 800, fontSize: 14,
 };
 
 const fileButtonStyle = {
-  marginLeft: 8,
-  padding: "6px 16px",
-  borderRadius: 8,
-  background: "rgba(255,255,255,0.12)",
-  color: "#fff",
-  fontSize: 13,
-  cursor: "pointer",
+  marginLeft: 8, padding: "6px 16px", borderRadius: 8,
+  background: "rgba(255,255,255,0.12)", color: "#fff",
+  fontSize: 13, cursor: "pointer",
   border: "1px solid rgba(255,255,255,0.2)",
   transition: "background 0.2s",
 };
 
-const viewModeBtn = {
-  padding: "5px 14px",
-  borderRadius: 6,
-  border: "none",
-  fontSize: 13,
-  fontWeight: 500,
-  cursor: "pointer",
+const panelToggleBtn = {
+  padding: "5px 14px", borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.15)",
+  fontSize: 12, fontWeight: 600, cursor: "pointer",
   transition: "all 0.15s",
 };
 
 const isolationModeBtn = {
-  padding: "5px 12px",
-  borderRadius: 6,
-  border: "none",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
+  padding: "5px 12px", borderRadius: 6, border: "none",
+  fontSize: 12, fontWeight: 600, cursor: "pointer",
   transition: "all 0.15s",
 };
 
 const filterBarStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "8px 20px",
-  background: "#fff8f0",
-  borderBottom: "1px solid #ffe0b2",
-  fontSize: 13,
-  flexShrink: 0,
+  display: "flex", alignItems: "center", justifyContent: "space-between",
+  padding: "8px 20px", background: "#fff8f0",
+  borderBottom: "1px solid #ffe0b2", fontSize: 13, flexShrink: 0,
 };
 
-const filterIconStyle = {
-  color: "#ff6600",
-  fontSize: 14,
-};
+const filterIconStyle = { color: "#ff6600", fontSize: 14 };
 
 const clearFilterBtn = {
-  padding: "4px 14px",
-  borderRadius: 6,
-  border: "1px solid #ffcc80",
-  background: "#fff",
-  color: "#cc5200",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  transition: "all 0.15s",
+  padding: "4px 14px", borderRadius: 6,
+  border: "1px solid #ffcc80", background: "#fff",
+  color: "#cc5200", fontSize: 12, fontWeight: 600,
+  cursor: "pointer", transition: "all 0.15s",
 };
 
 const errorStyle = {
-  margin: 24,
-  padding: 16,
-  background: "#fef2f2",
-  borderRadius: 8,
-  color: "#dc2626",
-  border: "1px solid #fecaca",
+  margin: 24, padding: 16, background: "#fef2f2",
+  borderRadius: 8, color: "#dc2626", border: "1px solid #fecaca",
+  whiteSpace: "pre-line",
 };
 
 const uploadBtnStyle = {
-  display: "inline-block",
-  padding: "12px 32px",
-  borderRadius: 10,
+  display: "inline-block", padding: "12px 32px", borderRadius: 10,
   background: "linear-gradient(135deg, #4f46e5, #06b6d4)",
-  color: "#fff",
-  fontSize: 15,
-  fontWeight: 600,
-  cursor: "pointer",
+  color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer",
   boxShadow: "0 4px 14px rgba(79, 70, 229, 0.4)",
   transition: "transform 0.2s",
 };

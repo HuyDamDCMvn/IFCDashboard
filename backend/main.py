@@ -1,9 +1,10 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import ifcopenshell
 import ifcopenshell.util.element as element_util
 import tempfile
 import os
+from uuid import uuid4
 
 app = FastAPI(title="IFC Dashboard API")
 
@@ -131,7 +132,7 @@ def get_spatial_info(product):
 
 
 @app.post("/api/parse-ifc")
-async def parse_ifc(file: UploadFile = File(...)):
+async def parse_ifc(file: UploadFile = File(...), model_id: str = Form(None)):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
         content = await file.read()
         tmp.write(content)
@@ -248,6 +249,7 @@ async def parse_ifc(file: UploadFile = File(...)):
     }
 
     return {
+        "modelId": model_id or str(uuid4()),
         "project": project_info,
         "buildings": building_info,
         "storeys": storey_info,

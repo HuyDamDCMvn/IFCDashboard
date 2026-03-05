@@ -48,3 +48,86 @@ input:focus, select:focus, button:focus {
 table {
   border-spacing: 0;
 }
+
+/* ─── Main panel split resize handle (react-resizable-panels v4) ─── */
+
+.resize-handle-outer {
+  width: 8px;
+  background: #e5e7eb;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.resize-handle-outer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 32px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.resize-handle-outer:hover,
+.resize-handle-outer[data-separator="active"] {
+  background: #4f46e5;
+}
+
+.resize-handle-outer:hover::after,
+.resize-handle-outer[data-separator="active"]::after {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* ─── react-grid-layout items ─── */
+
+.react-grid-item {
+  transition: all 200ms ease;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: rgba(79, 70, 229, 0.08) !important;
+  border: 2px dashed rgba(79, 70, 229, 0.3) !important;
+  border-radius: 12px;
+  opacity: 1 !important;
+}
+
+.react-grid-item.react-draggable-dragging {
+  z-index: 100;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  opacity: 0.9;
+  border-radius: 12px;
+}
+
+.react-grid-item > .react-resizable-handle {
+  background-image: none !important;
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  content: '' !important;
+  position: absolute !important;
+  right: 4px !important;
+  bottom: 4px !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-right: 2px solid rgba(0, 0, 0, 0.15) !important;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.15) !important;
+  border-radius: 0 0 2px 0;
+}
+
+.react-grid-item > .react-resizable-handle:hover::after {
+  border-color: #4f46e5 !important;
+}
+
+/* ─── Drag handle cursor ─── */
+
+.panel-drag-handle {
+  cursor: grab;
+}
+
+.panel-drag-handle:active {
+  cursor: grabbing;
+}

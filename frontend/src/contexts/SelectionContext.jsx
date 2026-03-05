@@ -7,14 +7,21 @@ export function SelectionProvider({ children }) {
   const [filterGlobalIds, setFilterGlobalIds] = useState(null);
   const [filterLabel, setFilterLabel] = useState("");
   const [filterKey, setFilterKey] = useState(null);
+  const [filterColor, setFilterColor] = useState(null);
+  const [filterColorMap, setFilterColorMap] = useState(null);
+  const [filterModelIds, setFilterModelIds] = useState(null);
   const [selectedExpressID, setSelectedExpressID] = useState(null);
+  const [selectedModelId, setSelectedModelId] = useState(null);
   const [isolationMode, setIsolationMode] = useState("xray");
 
-  const applyFilter = useCallback((expressIDs, label, key, globalIds) => {
+  const applyFilter = useCallback((expressIDs, label, key, globalIds, color, colorMap, modelIds) => {
     setFilterExpressIDs(expressIDs);
     setFilterGlobalIds(globalIds || null);
     setFilterLabel(label);
     setFilterKey(key || label);
+    setFilterColor(color || null);
+    setFilterColorMap(colorMap || null);
+    setFilterModelIds(modelIds || null);
   }, []);
 
   const clearFilter = useCallback(() => {
@@ -22,19 +29,27 @@ export function SelectionProvider({ children }) {
     setFilterGlobalIds(null);
     setFilterLabel("");
     setFilterKey(null);
+    setFilterColor(null);
+    setFilterColorMap(null);
+    setFilterModelIds(null);
   }, []);
 
   const toggleFilter = useCallback(
-    (expressIDs, label, key, globalIds) => {
+    (expressIDs, label, key, globalIds, color, colorMap, modelIds) => {
       const k = key || label;
       if (filterKey === k) {
         clearFilter();
       } else {
-        applyFilter(expressIDs, label, k, globalIds);
+        applyFilter(expressIDs, label, k, globalIds, color, colorMap, modelIds);
       }
     },
     [filterKey, applyFilter, clearFilter]
   );
+
+  const setSelected = useCallback((expressId, modelId) => {
+    setSelectedExpressID(expressId);
+    setSelectedModelId(modelId || null);
+  }, []);
 
   return (
     <SelectionContext.Provider
@@ -43,12 +58,16 @@ export function SelectionProvider({ children }) {
         filterGlobalIds,
         filterLabel,
         filterKey,
+        filterColor,
+        filterColorMap,
+        filterModelIds,
         selectedExpressID,
+        selectedModelId,
         isolationMode,
         applyFilter,
         clearFilter,
         toggleFilter,
-        setSelectedExpressID,
+        setSelectedExpressID: setSelected,
         setIsolationMode,
       }}
     >
