@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, lazy, Suspense } from "react";
 import axios from "axios";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import IfcViewer from "./components/IfcViewer";
@@ -7,6 +7,8 @@ import SelectedElement from "./components/SelectedElement";
 import ModelManager from "./components/ModelManager";
 import { SelectionProvider, useSelection } from "./contexts/SelectionContext";
 import { ModelRegistryProvider, useModelRegistry } from "./contexts/ModelRegistryContext";
+
+const IdsBuilder = lazy(() => import("./components/ids-builder/IdsBuilder"));
 
 const API_URL = "";
 
@@ -31,6 +33,7 @@ function AppContent() {
   const [error, setError] = useState("");
   const [viewerCollapsed, setViewerCollapsed] = useState(false);
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
+  const [idsBuilderOpen, setIdsBuilderOpen] = useState(false);
 
   const viewerPanelRef = usePanelRef();
   const dashboardPanelRef = usePanelRef();
@@ -139,6 +142,14 @@ function AppContent() {
           />
         </label>
 
+        <button
+          onClick={() => setIdsBuilderOpen(true)}
+          style={idsButtonStyle}
+          title="Open IDS Builder — create and manage Information Delivery Specifications"
+        >
+          IDS Builder
+        </button>
+
         {/* Panel toggle controls */}
         {hasModels && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
@@ -206,6 +217,16 @@ function AppContent() {
             Clear Filter &times;
           </button>
         </div>
+      )}
+
+      {/* IDS Builder Modal */}
+      {idsBuilderOpen && (
+        <Suspense fallback={null}>
+          <IdsBuilder
+            onClose={() => setIdsBuilderOpen(false)}
+            modelData={mergedData}
+          />
+        </Suspense>
       )}
 
       {/* Main Content */}
@@ -353,6 +374,15 @@ const fileButtonStyle = {
   fontSize: 13, cursor: "pointer",
   border: "1px solid rgba(255,255,255,0.2)",
   transition: "background 0.2s",
+};
+
+const idsButtonStyle = {
+  padding: "6px 16px", borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(16,185,129,0.25), rgba(6,182,212,0.25))",
+  color: "#6ee7b7", fontSize: 13, fontWeight: 600,
+  cursor: "pointer",
+  border: "1px solid rgba(16,185,129,0.4)",
+  transition: "all 0.2s",
 };
 
 const panelToggleBtn = {

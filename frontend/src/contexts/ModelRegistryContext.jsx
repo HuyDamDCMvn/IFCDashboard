@@ -11,6 +11,11 @@ const MODEL_COLORS = [
 
 export function ModelRegistryProvider({ children }) {
   const [models, setModels] = useState(new Map());
+  const [focusedModelId, setFocusedModelId] = useState(null);
+
+  const focusModel = useCallback((id) => {
+    setFocusedModelId((prev) => (prev === id ? null : id));
+  }, []);
 
   const addModel = useCallback((id, fileName, file, dashboardData) => {
     setModels((prev) => {
@@ -37,6 +42,7 @@ export function ModelRegistryProvider({ children }) {
       next.delete(id);
       return next;
     });
+    setFocusedModelId((prev) => (prev === id ? null : prev));
   }, []);
 
   const toggleModelVisibility = useCallback((id) => {
@@ -100,12 +106,14 @@ export function ModelRegistryProvider({ children }) {
         allModelsList,
         visibleModels,
         mergedData,
+        focusedModelId,
         addModel,
         removeModel,
         toggleModelVisibility,
         setModelLoaded,
         setModelDiscipline,
         setModelColor,
+        focusModel,
       }}
     >
       {children}

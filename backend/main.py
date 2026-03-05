@@ -1,10 +1,19 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 import ifcopenshell
 import ifcopenshell.util.element as element_util
 import tempfile
 import os
+import json
 from uuid import uuid4
+from datetime import date
+
+try:
+    from ifctester import ids as ifctester_ids
+    HAS_IFCTESTER = True
+except ImportError:
+    HAS_IFCTESTER = False
 
 app = FastAPI(title="IFC Dashboard API")
 
@@ -266,4 +275,273 @@ async def parse_ifc(file: UploadFile = File(...), model_id: str = Form(None)):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "ifctester": HAS_IFCTESTER}
+
+
+# ─── IDS Builder Endpoints ────────────────────────────────────────
+
+def _build_restriction(val_def):
+    """Convert a JSON restriction/value to ifctester-compatible form."""
+    if not val_def:
+        return None
+    if isinstance(val_def, str):
+        return val_def if val_def else None
+    if isinstance(val_def, dict) and val_def.get("type"):
+        from ifctester.facet import Restriction
+        r = Restriction()
+        r.base = val_def.get("base", "xs:string")
+        rtype = val_def["type"]
+        if rtype == "enumeration":
+            r.options = {"enumeration": val_def.get("values", [])}
+        elif rtype == "pattern":
+            r.options = {"pattern": val_def.get("pattern", "")}
+        elif rtype == "bounds":
+            opts = {}
+            if val_def.get("minInclusive") not in (None, ""):
+                opts["minInclusive"] = val_def["minInclusive"]
+            if val_def.get("maxInclusive") not in (None, ""):
+                opts["maxInclusive"] = val_def["maxInclusive"]
+            r.options = opts
+        elif rtype == "length":
+            opts = {}
+            if val_def.get("minLength") not in (None, ""):
+                opts["minLength"] = val_def["minLength"]
+            if val_def.get("maxLength") not in (None, ""):
+                opts["maxLength"] = val_def["maxLength"]
+            r.options = opts
+        return r
+    return None
+
+
+def _build_facet(fdef):
+    """Convert a JSON facet definition to an ifctester facet object."""
+    t = fdef["type"]
+    p = fdef.get("params", {})
+    card = fdef.get("cardinality", "required")
+    instr = fdef.get("instructions") or None
+
+    if t == "entity":
+        return ifctester_ids.Entity(
+            name=p.get("name", "IFCWALL"),
+            predefinedType=p.get("predefinedType") or None,
+            instructions=instr,
+        )
+    elif t == "attribute":
+        return ifctester_ids.Attribute(
+            name=p.get("name", "Name"),
+            value=_build_restriction(p.get("value")),
+            cardinality=card,
+            instructions=instr,
+        )
+    elif t == "property":
+        return ifctester_ids.Property(
+            propertySet=p.get("propertySet", ""),
+            baseName=p.get("baseName", ""),
+            value=_build_restriction(p.get("value")),
+            dataType=p.get("dataType") or None,
+            uri=p.get("uri") or None,
+            cardinality=card,
+            instructions=instr,
+        )
+    elif t == "classification":
+        return ifctester_ids.Classification(
+            system=p.get("system") or None,
+            value=_build_restriction(p.get("value")),
+            uri=p.get("uri") or None,
+            cardinality=card,
+            instructions=instr,
+        )
+    elif t == "material":
+        return ifctester_ids.Material(
+            value=_build_restriction(p.get("value")),
+            uri=p.get("uri") or None,
+            cardinality=card,
+            instructions=instr,
+        )
+    elif t == "partOf":
+        return ifctester_ids.PartOf(
+            name=p.get("name", "IFCBUILDINGSTOREY"),
+            predefinedType=p.get("predefinedType") or None,
+            relation=p.get("relation") or None,
+            cardinality=card,
+            instructions=instr,
+        )
+    raise ValueError(f"Unknown facet type: {t}")
+
+
+def _json_to_ids(payload: dict):
+    """Convert a JSON IDS document to an ifctester Ids object."""
+    if not HAS_IFCTESTER:
+        raise RuntimeError("ifctester not installed")
+
+    info = payload.get("info", {})
+    specs = ifctester_ids.Ids(
+        title=info.get("title", "Untitled"),
+        version=info.get("version", "1.0"),
+        author=info.get("author", ""),
+        description=info.get("description", ""),
+        date=info.get("date", str(date.today())),
+    )
+
+    for sdef in payload.get("specifications", []):
+        spec = ifctester_ids.Specification(
+            name=sdef.get("name", "Untitled"),
+            description=sdef.get("description") or None,
+            ifcVersion=sdef.get("ifcVersion", ["IFC4"]),
+        )
+        for fdef in sdef.get("applicability", []):
+            spec.applicability.append(_build_facet(fdef))
+        for fdef in sdef.get("requirements", []):
+            spec.requirements.append(_build_facet(fdef))
+        specs.specifications.append(spec)
+
+    return specs
+
+
+@app.post("/api/build-ids")
+async def build_ids(payload: dict = Body(...)):
+    """Build IDS XML from JSON definition and return as downloadable file."""
+    if not HAS_IFCTESTER:
+        return Response(
+            content="ifctester not installed. Run: pip install ifctester",
+            status_code=501,
+        )
+    try:
+        specs = _json_to_ids(payload)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ids")
+        tmp.close()
+        specs.to_xml(tmp.name)
+        with open(tmp.name, "r", encoding="utf-8") as f:
+            xml_content = f.read()
+        os.unlink(tmp.name)
+        return Response(content=xml_content, media_type="application/xml")
+    except Exception as e:
+        return Response(content=str(e), status_code=400)
+
+
+@app.post("/api/parse-ids")
+async def parse_ids_file(file: UploadFile = File(...)):
+    """Parse an IDS XML file and return JSON representation for the editor."""
+    if not HAS_IFCTESTER:
+        return Response(
+            content="ifctester not installed. Run: pip install ifctester",
+            status_code=501,
+        )
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ids") as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        specs = ifctester_ids.open(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+
+    def facet_to_json(f):
+        result = {
+            "id": str(uuid4()),
+            "type": "",
+            "cardinality": getattr(f, "cardinality", "required") or "required",
+            "instructions": getattr(f, "instructions", "") or "",
+            "params": {},
+        }
+        cls_name = type(f).__name__
+
+        def val_str(v):
+            if v is None:
+                return ""
+            if hasattr(v, "options") and v.options:
+                opts = v.options
+                if "enumeration" in opts:
+                    return {"type": "enumeration", "base": getattr(v, "base", "xs:string"), "values": opts["enumeration"]}
+                if "pattern" in opts:
+                    return {"type": "pattern", "base": getattr(v, "base", "xs:string"), "pattern": opts["pattern"]}
+                bounds = {}
+                for k in ("minInclusive", "maxInclusive", "minLength", "maxLength"):
+                    if k in opts:
+                        bounds[k] = opts[k]
+                if bounds:
+                    rtype = "bounds" if "minInclusive" in bounds or "maxInclusive" in bounds else "length"
+                    return {"type": rtype, "base": getattr(v, "base", "xs:string"), **bounds}
+            return str(v) if v else ""
+
+        if cls_name == "Entity":
+            result["type"] = "entity"
+            result["params"] = {
+                "name": getattr(f, "name", "") or "",
+                "predefinedType": getattr(f, "predefinedType", "") or "",
+            }
+        elif cls_name == "Attribute":
+            result["type"] = "attribute"
+            result["params"] = {
+                "name": getattr(f, "name", "") or "",
+                "value": val_str(getattr(f, "value", None)),
+            }
+        elif cls_name == "Property":
+            result["type"] = "property"
+            result["params"] = {
+                "propertySet": getattr(f, "propertySet", "") or "",
+                "baseName": getattr(f, "baseName", "") or "",
+                "dataType": getattr(f, "dataType", "") or "",
+                "value": val_str(getattr(f, "value", None)),
+                "uri": getattr(f, "uri", "") or "",
+            }
+        elif cls_name == "Classification":
+            result["type"] = "classification"
+            result["params"] = {
+                "system": getattr(f, "system", "") or "",
+                "value": val_str(getattr(f, "value", None)),
+                "uri": getattr(f, "uri", "") or "",
+            }
+        elif cls_name == "Material":
+            result["type"] = "material"
+            result["params"] = {
+                "value": val_str(getattr(f, "value", None)),
+                "uri": getattr(f, "uri", "") or "",
+            }
+        elif cls_name == "PartOf":
+            result["type"] = "partOf"
+            result["params"] = {
+                "name": getattr(f, "name", "") or "",
+                "predefinedType": getattr(f, "predefinedType", "") or "",
+                "relation": getattr(f, "relation", "") or "",
+            }
+        return result
+
+    doc = {
+        "info": {
+            "title": getattr(specs, "title", "") or "Imported IDS",
+            "version": getattr(specs, "version", "") or "1.0",
+            "author": getattr(specs, "author", "") or "",
+            "description": getattr(specs, "description", "") or "",
+            "date": getattr(specs, "date", "") or str(date.today()),
+        },
+        "specifications": [],
+    }
+    for spec in specs.specifications:
+        sdef = {
+            "id": str(uuid4()),
+            "name": getattr(spec, "name", "") or "Untitled",
+            "description": getattr(spec, "description", "") or "",
+            "ifcVersion": getattr(spec, "ifcVersion", ["IFC4"]) or ["IFC4"],
+            "instructions": getattr(spec, "instructions", "") or "",
+            "applicability": [facet_to_json(f) for f in (spec.applicability or [])],
+            "requirements": [facet_to_json(f) for f in (spec.requirements or [])],
+        }
+        doc["specifications"].append(sdef)
+
+    return doc
+
+
+@app.post("/api/validate-ids-inline")
+async def validate_ids_inline(payload: dict = Body(...)):
+    """Validate IFC model data against IDS specs (client-side model data)."""
+    if not HAS_IFCTESTER:
+        return Response(
+            content="ifctester not installed. Run: pip install ifctester",
+            status_code=501,
+        )
+    return {
+        "error": "Inline validation requires IFC file. Use /api/validate-ids with file upload.",
+        "hint": "This endpoint is a placeholder for future server-side validation.",
+    }

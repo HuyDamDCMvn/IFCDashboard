@@ -12,6 +12,8 @@ export default function ModelManager({ onAddFiles }) {
     removeModel,
     toggleModelVisibility,
     setModelDiscipline,
+    focusModel,
+    focusedModelId,
   } = useModelRegistry();
 
   const handleFileInput = useCallback((e) => {
@@ -53,9 +55,11 @@ export default function ModelManager({ onAddFiles }) {
           <ModelRow
             key={entry.id}
             entry={entry}
+            focused={focusedModelId === entry.id}
             onToggleVisibility={() => toggleModelVisibility(entry.id)}
             onRemove={() => removeModel(entry.id)}
             onSetDiscipline={(d) => setModelDiscipline(entry.id, d)}
+            onFocus={() => focusModel(entry.id)}
           />
         ))}
       </div>
@@ -63,7 +67,7 @@ export default function ModelManager({ onAddFiles }) {
   );
 }
 
-function ModelRow({ entry, onToggleVisibility, onRemove, onSetDiscipline }) {
+function ModelRow({ entry, focused, onToggleVisibility, onRemove, onSetDiscipline, onFocus }) {
   const elCount = entry.dashboardData?.elements?.length || 0;
 
   return (
@@ -71,7 +75,8 @@ function ModelRow({ entry, onToggleVisibility, onRemove, onSetDiscipline }) {
       padding: "8px 12px",
       borderBottom: "1px solid #f0f0f0",
       opacity: entry.visible ? 1 : 0.5,
-      transition: "opacity 0.2s",
+      background: focused ? "#eef2ff" : "transparent",
+      transition: "opacity 0.2s, background 0.2s",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {/* Visibility toggle */}
@@ -93,13 +98,19 @@ function ModelRow({ entry, onToggleVisibility, onRemove, onSetDiscipline }) {
           background: entry.color, flexShrink: 0,
         }} />
 
-        {/* File name */}
-        <span style={{
-          flex: 1, fontSize: 12, fontWeight: 600,
-          color: "#333", overflow: "hidden",
-          textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}
-          title={entry.fileName}
+        {/* File name — clickable to focus Dashboard */}
+        <span
+          onClick={onFocus}
+          style={{
+            flex: 1, fontSize: 12, fontWeight: 600,
+            color: focused ? "#4f46e5" : "#333",
+            overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+            cursor: "pointer",
+            textDecoration: focused ? "underline" : "none",
+            transition: "color 0.15s",
+          }}
+          title={`${entry.fileName} — click to filter Dashboard`}
         >
           {entry.fileName.replace(/\.ifc$/i, "")}
         </span>

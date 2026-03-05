@@ -83,7 +83,7 @@ function renderPieLabel({ cx, cy, midAngle, outerRadius, name, value, percent })
 
 function DashboardInner({ data, containerWidth }) {
   const { filterKey, toggleFilter } = useSelection();
-  const { allModelsList, visibleModels } = useModelRegistry();
+  const { allModelsList, visibleModels, focusedModelId } = useModelRegistry();
 
   const stored = useMemo(() => loadPrefs(), []);
 
@@ -160,6 +160,14 @@ function DashboardInner({ data, containerWidth }) {
       return pruned.size === prev.size ? prev : pruned;
     });
   }, [visibleIdSet]);
+
+  useEffect(() => {
+    if (focusedModelId && visibleIdSet.has(focusedModelId)) {
+      setModelFilter(new Set([focusedModelId]));
+    } else if (focusedModelId === null) {
+      setModelFilter(new Set());
+    }
+  }, [focusedModelId, visibleIdSet]);
 
   useEffect(() => {
     if (!classDropdownOpen && !modelDropdownOpen) return;
