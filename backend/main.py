@@ -635,11 +635,14 @@ async def validate_ids(
                         if status is False:
                             msg = getattr(req, "message", "") or ""
                             reasons.append(msg)
+                    spatial = get_spatial_info(entity)
                     failed_elements.append({
                         "expressId": entity.id() if hasattr(entity, "id") else None,
                         "globalId": entity.GlobalId if hasattr(entity, "GlobalId") else "",
                         "name": entity.Name if hasattr(entity, "Name") else "",
                         "type": entity.is_a() if hasattr(entity, "is_a") else "",
+                        "predefinedType": get_predefined_type(entity),
+                        "level": spatial.get("storey", ""),
                         "reasons": reasons,
                     })
 
