@@ -459,6 +459,7 @@ export default function IdsValidationReport({ results, onClose, onMinimize, idsI
             const specKey = `${mi}-${si}`;
             const isExpanded = expandedSpecs.has(specKey);
             const hasFailed = spec.failed > 0;
+            const isOptional = spec.usage === "optional";
             const statusColor = spec.status ? "#10b981" : "#ef4444";
 
             return (
@@ -480,8 +481,14 @@ export default function IdsValidationReport({ results, onClose, onMinimize, idsI
                     {spec.status ? "\u2713" : "\u2717"}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 6 }}>
                       {spec.name || "Untitled Specification"}
+                      {isOptional && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, color: "#d97706",
+                          background: "#fef3c7", padding: "1px 6px", borderRadius: 4,
+                        }}>OPTIONAL</span>
+                      )}
                     </div>
                     {spec.description && (
                       <div style={{ fontSize: 11, color: "#888", marginTop: 1 }}>{spec.description}</div>
@@ -520,9 +527,14 @@ export default function IdsValidationReport({ results, onClose, onMinimize, idsI
                   </div>
                 )}
 
-                {isExpanded && !hasFailed && (
+                {isExpanded && !hasFailed && spec.total > 0 && (
                   <div style={{ padding: "12px 14px", background: "#fff", color: "#166534", fontSize: 12 }}>
                     All {spec.total} applicable elements passed this specification.
+                  </div>
+                )}
+                {isExpanded && spec.total === 0 && (
+                  <div style={{ padding: "12px 14px", background: "#fff", color: "#888", fontSize: 12 }}>
+                    No applicable elements found for this specification.
                   </div>
                 )}
               </div>

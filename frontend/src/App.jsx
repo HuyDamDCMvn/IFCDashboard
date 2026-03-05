@@ -8,11 +8,13 @@ import ModelManager from "./components/ModelManager";
 import { SelectionProvider, useSelection } from "./contexts/SelectionContext";
 import { ModelRegistryProvider, useModelRegistry } from "./contexts/ModelRegistryContext";
 import { IfcEditProvider, useIfcEdit } from "./contexts/IfcEditContext";
+import { IfcDiffProvider } from "./contexts/IfcDiffContext";
 import PropertyEditor from "./components/ifc-editor/PropertyEditor";
 import EditHistory from "./components/ifc-editor/EditHistory";
 import ExportButton from "./components/ifc-editor/ExportButton";
 
 const IdsBuilder = lazy(() => import("./components/ids-builder/IdsBuilder"));
+const IfcDiffPanel = lazy(() => import("./components/IfcDiffPanel"));
 
 const API_URL = "";
 
@@ -21,7 +23,9 @@ function App() {
     <SelectionProvider>
       <ModelRegistryProvider>
         <IfcEditProvider>
-          <AppContent />
+          <IfcDiffProvider>
+            <AppContent />
+          </IfcDiffProvider>
         </IfcEditProvider>
       </ModelRegistryProvider>
     </SelectionProvider>
@@ -40,6 +44,7 @@ function AppContent() {
   const [viewerCollapsed, setViewerCollapsed] = useState(false);
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
   const [idsBuilderOpen, setIdsBuilderOpen] = useState(false);
+  const [diffPanelOpen, setDiffPanelOpen] = useState(false);
 
   const viewerPanelRef = usePanelRef();
   const dashboardPanelRef = usePanelRef();
@@ -157,6 +162,14 @@ function AppContent() {
           IDS Builder
         </button>
 
+        <button
+          onClick={() => setDiffPanelOpen(true)}
+          style={diffButtonStyle}
+          title="Compare two IFC files — detect added, deleted, and changed elements"
+        >
+          IFC Diff
+        </button>
+
         {/* Edit Mode toggle */}
         {hasModels && !isSessionOpen && (
           <EditModeButton models={models} startSession={startSession} />
@@ -240,6 +253,13 @@ function AppContent() {
             modelData={mergedData}
             modelsList={allModelsList}
           />
+        </Suspense>
+      )}
+
+      {/* IFC Diff Modal */}
+      {diffPanelOpen && (
+        <Suspense fallback={null}>
+          <IfcDiffPanel onClose={() => setDiffPanelOpen(false)} />
         </Suspense>
       )}
 
@@ -434,6 +454,15 @@ const idsButtonStyle = {
   color: "#6ee7b7", fontSize: 13, fontWeight: 600,
   cursor: "pointer",
   border: "1px solid rgba(16,185,129,0.4)",
+  transition: "all 0.2s",
+};
+
+const diffButtonStyle = {
+  padding: "6px 16px", borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(245,158,11,0.25), rgba(239,68,68,0.2))",
+  color: "#fbbf24", fontSize: 13, fontWeight: 600,
+  cursor: "pointer",
+  border: "1px solid rgba(245,158,11,0.4)",
   transition: "all 0.2s",
 };
 

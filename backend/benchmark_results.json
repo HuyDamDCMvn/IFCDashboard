@@ -1,0 +1,376 @@
+[
+  {
+    "pair": "1_identical",
+    "strategy": "guid_only",
+    "avg_s": 0.0027,
+    "min_s": 0.0027,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "1_identical",
+    "strategy": "hash_fast",
+    "avg_s": 0.0174,
+    "min_s": 0.0103,
+    "mem_mb": 1.4,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "1_identical",
+    "strategy": "hash+placement",
+    "avg_s": 0.0327,
+    "min_s": 0.0308,
+    "mem_mb": 0.1,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "1_identical",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.3491,
+    "min_s": 0.3366,
+    "mem_mb": 7.6,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "1_identical",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.3767,
+    "min_s": 0.3602,
+    "mem_mb": 2.4,
+    "added": 0,
+    "deleted": 0,
+    "changed": 15
+  },
+  {
+    "pair": "2_rename_30pct",
+    "strategy": "guid_only",
+    "avg_s": 0.0033,
+    "min_s": 0.003,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "2_rename_30pct",
+    "strategy": "hash_fast",
+    "avg_s": 0.0092,
+    "min_s": 0.0089,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 5
+  },
+  {
+    "pair": "2_rename_30pct",
+    "strategy": "hash+placement",
+    "avg_s": 0.0275,
+    "min_s": 0.0269,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 5
+  },
+  {
+    "pair": "2_rename_30pct",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.363,
+    "min_s": 0.3474,
+    "mem_mb": -0.6,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "2_rename_30pct",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.4085,
+    "min_s": 0.361,
+    "mem_mb": 7.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 15
+  },
+  {
+    "pair": "3_move_20pct",
+    "strategy": "guid_only",
+    "avg_s": 0.0036,
+    "min_s": 0.0031,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "3_move_20pct",
+    "strategy": "hash_fast",
+    "avg_s": 0.0125,
+    "min_s": 0.0109,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "3_move_20pct",
+    "strategy": "hash+placement",
+    "avg_s": 0.0327,
+    "min_s": 0.0322,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 3
+  },
+  {
+    "pair": "3_move_20pct",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.3555,
+    "min_s": 0.3487,
+    "mem_mb": 2.8,
+    "added": 0,
+    "deleted": 0,
+    "changed": 1
+  },
+  {
+    "pair": "3_move_20pct",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.3532,
+    "min_s": 0.3437,
+    "mem_mb": 3.7,
+    "added": 0,
+    "deleted": 0,
+    "changed": 15
+  },
+  {
+    "pair": "4_add_pset",
+    "strategy": "guid_only",
+    "avg_s": 0.0031,
+    "min_s": 0.0029,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "4_add_pset",
+    "strategy": "hash_fast",
+    "avg_s": 0.0125,
+    "min_s": 0.0117,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 4
+  },
+  {
+    "pair": "4_add_pset",
+    "strategy": "hash+placement",
+    "avg_s": 0.0342,
+    "min_s": 0.0333,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 4
+  },
+  {
+    "pair": "4_add_pset",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.3365,
+    "min_s": 0.3353,
+    "mem_mb": 4.5,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "4_add_pset",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.3329,
+    "min_s": 0.3264,
+    "mem_mb": 8.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 15
+  },
+  {
+    "pair": "5_mixed",
+    "strategy": "guid_only",
+    "avg_s": 0.003,
+    "min_s": 0.0029,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "5_mixed",
+    "strategy": "hash_fast",
+    "avg_s": 0.0096,
+    "min_s": 0.0096,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 3
+  },
+  {
+    "pair": "5_mixed",
+    "strategy": "hash+placement",
+    "avg_s": 0.0285,
+    "min_s": 0.0268,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 4
+  },
+  {
+    "pair": "5_mixed",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.3055,
+    "min_s": 0.2966,
+    "mem_mb": 4.6,
+    "added": 0,
+    "deleted": 0,
+    "changed": 1
+  },
+  {
+    "pair": "5_mixed",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.3215,
+    "min_s": 0.3196,
+    "mem_mb": 3.6,
+    "added": 0,
+    "deleted": 0,
+    "changed": 15
+  },
+  {
+    "pair": "6_cross_schema",
+    "status": "schema_mismatch"
+  },
+  {
+    "pair": "7_road_mixed",
+    "strategy": "guid_only",
+    "avg_s": 0.0096,
+    "min_s": 0.0074,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "7_road_mixed",
+    "strategy": "hash_fast",
+    "avg_s": 0.0295,
+    "min_s": 0.0289,
+    "mem_mb": 0.1,
+    "added": 0,
+    "deleted": 0,
+    "changed": 5
+  },
+  {
+    "pair": "7_road_mixed",
+    "strategy": "hash+placement",
+    "avg_s": 0.0886,
+    "min_s": 0.0881,
+    "mem_mb": 0.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 72
+  },
+  {
+    "pair": "7_road_mixed",
+    "strategy": "ifcdiff_default",
+    "avg_s": 0.3866,
+    "min_s": 0.3847,
+    "mem_mb": 1.7,
+    "added": 0,
+    "deleted": 0,
+    "changed": 45
+  },
+  {
+    "pair": "7_road_mixed",
+    "strategy": "ifcdiff_full",
+    "avg_s": 0.4632,
+    "min_s": 0.4483,
+    "mem_mb": 3.2,
+    "added": 0,
+    "deleted": 0,
+    "changed": 47
+  },
+  {
+    "pair": "8_medium_mixed",
+    "strategy": "guid_only",
+    "avg_s": 0.2872,
+    "min_s": 0.2851,
+    "mem_mb": -1.3,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "8_medium_mixed",
+    "strategy": "hash_fast",
+    "avg_s": 0.4676,
+    "min_s": 0.4667,
+    "mem_mb": -7.1,
+    "added": 0,
+    "deleted": 0,
+    "changed": 13
+  },
+  {
+    "pair": "8_medium_mixed",
+    "strategy": "hash+placement",
+    "avg_s": 0.545,
+    "min_s": 0.5449,
+    "mem_mb": 1.6,
+    "added": 0,
+    "deleted": 0,
+    "changed": 21
+  },
+  {
+    "pair": "8_medium_mixed",
+    "strategy": "ifcdiff_default",
+    "avg_s": 1.2424,
+    "min_s": 1.2174,
+    "mem_mb": 34.8,
+    "added": 0,
+    "deleted": 0,
+    "changed": 10
+  },
+  {
+    "pair": "9_medium_identical",
+    "strategy": "guid_only",
+    "avg_s": 0.2915,
+    "min_s": 0.2885,
+    "mem_mb": 2.0,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "9_medium_identical",
+    "strategy": "hash_fast",
+    "avg_s": 0.4912,
+    "min_s": 0.4885,
+    "mem_mb": -2.4,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  },
+  {
+    "pair": "9_medium_identical",
+    "strategy": "hash+placement",
+    "avg_s": 0.591,
+    "min_s": 0.5891,
+    "mem_mb": -2.9,
+    "added": 0,
+    "deleted": 0,
+    "changed": 0
+  }
+]

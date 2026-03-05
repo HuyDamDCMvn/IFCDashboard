@@ -1,9 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+import hashlib
 import ifcopenshell
 import ifcopenshell.api
 import ifcopenshell.util.element as element_util
+import ifcopenshell.util.placement
+import numpy as np
 import tempfile
 import os
 import json
@@ -821,45 +824,57 @@ async def validate_ids(
         for spec in ids_obj.specifications:
             applicable = getattr(spec, "applicable_entities", []) or []
             total = len(applicable)
-            passed = sum(
-                1 for e in applicable
-                if getattr(e, "is_satisfied", lambda: True)()
-            ) if applicable else 0
-            failed = total - passed
+
+            failure_map = {}
+            for req in (spec.requirements or []):
+                for fail_info in getattr(req, "failures", []) or []:
+                    if isinstance(fail_info, dict):
+                        entity = fail_info.get("element")
+                        reason = fail_info.get("reason", "")
+                    else:
+                        entity = fail_info
+                        reason = ""
+                    if entity is None or not hasattr(entity, "id"):
+                        continue
+                    eid = entity.id()
+                    if eid not in failure_map:
+                        failure_map[eid] = {"entity": entity, "reasons": []}
+                    if reason:
+                        failure_map[eid]["reasons"].append(reason)
+
+            failed = len(failure_map)
+            passed = total - failed
 
             failed_elements = []
-            for entity in applicable:
-                if not getattr(entity, "is_satisfied", lambda: True)():
-                    reasons = []
-                    for req in (spec.requirements or []):
-                        status = getattr(req, "status", None)
-                        if status is False:
-                            msg = getattr(req, "message", "") or ""
-                            reasons.append(msg)
-                    spatial = get_spatial_info(entity)
-                    failed_elements.append({
-                        "expressId": entity.id() if hasattr(entity, "id") else None,
-                        "globalId": entity.GlobalId if hasattr(entity, "GlobalId") else "",
-                        "name": entity.Name if hasattr(entity, "Name") else "",
-                        "type": entity.is_a() if hasattr(entity, "is_a") else "",
-                        "predefinedType": get_predefined_type(entity),
-                        "level": spatial.get("storey", ""),
-                        "reasons": reasons,
-                    })
+            for eid, info in failure_map.items():
+                entity = info["entity"]
+                spatial = get_spatial_info(entity)
+                failed_elements.append({
+                    "expressId": eid,
+                    "globalId": entity.GlobalId if hasattr(entity, "GlobalId") else "",
+                    "name": entity.Name if hasattr(entity, "Name") else "",
+                    "type": entity.is_a() if hasattr(entity, "is_a") else "",
+                    "predefinedType": get_predefined_type(entity),
+                    "level": spatial.get("storey", ""),
+                    "reasons": info["reasons"],
+                })
 
             spec_status = getattr(spec, "status", None)
+            usage = spec.get_usage() if hasattr(spec, "get_usage") else "required"
 
             results.append({
                 "name": getattr(spec, "name", ""),
                 "description": getattr(spec, "description", "") or "",
                 "status": spec_status,
+                "usage": usage,
                 "total": total,
                 "passed": passed,
                 "failed": failed,
                 "failedElements": failed_elements[:200],
             })
 
-        overall = all(r["status"] for r in results) if results else True
+        required_results = [r for r in results if r.get("usage") != "optional"]
+        overall = all(r["status"] for r in required_results) if required_results else True
         return {
             "overall": overall,
             "fileName": ifc_file.filename,
@@ -877,3 +892,340 @@ async def validate_ids(
         )
     finally:
         os.unlink(ifc_path)
+
+
+# ─── IFC Diff Endpoints ──────────────────────────────────────────
+
+def _get_schema_id(ifc):
+    try:
+        return ifc.schema_identifier
+    except Exception:
+        return ifc.schema
+
+
+def _collect_products(ifc):
+    """Collect all diffable products (IfcElement + IfcSpatialElement, excluding features)."""
+    elems = ifc.by_type("IfcElement")
+    if ifc.schema == "IFC2X3":
+        elems += ifc.by_type("IfcSpatialStructureElement")
+    else:
+        try:
+            elems += ifc.by_type("IfcSpatialElement")
+        except Exception:
+            pass
+    return [e for e in elems if not e.is_a("IfcFeatureElement") and getattr(e, "GlobalId", None)]
+
+
+def _pset_hash(psets: dict) -> str:
+    cleaned = {}
+    for pn, props in sorted(psets.items()):
+        cleaned[pn] = {k: v for k, v in sorted(props.items()) if k != "id"}
+    return hashlib.md5(json.dumps(cleaned, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _diff_element_detail(old_el, new_el, old_ifc, new_ifc, precision=1e-4):
+    """Return detailed change dict for a single element, or None if unchanged."""
+    changes = {}
+
+    # Attribute changes
+    for attr in ("Name", "Description", "ObjectType", "PredefinedType", "Tag"):
+        ov = getattr(old_el, attr, None)
+        nv = getattr(new_el, attr, None)
+        if ov != nv:
+            changes.setdefault("attributes", {})[attr] = {
+                "old": str(ov) if ov is not None else None,
+                "new": str(nv) if nv is not None else None,
+            }
+
+    # Placement changes
+    try:
+        old_m = ifcopenshell.util.placement.get_local_placement(
+            old_el.ObjectPlacement
+        ) if getattr(old_el, "ObjectPlacement", None) else None
+        new_m = ifcopenshell.util.placement.get_local_placement(
+            new_el.ObjectPlacement
+        ) if getattr(new_el, "ObjectPlacement", None) else None
+        if old_m is not None and new_m is not None:
+            if not np.allclose(old_m, new_m, atol=precision):
+                changes["placement"] = True
+        elif (old_m is None) != (new_m is None):
+            changes["placement"] = True
+    except Exception:
+        pass
+
+    # Property changes (hash-first, detail on mismatch)
+    try:
+        old_psets = ifcopenshell.util.element.get_psets(old_el)
+    except Exception:
+        old_psets = {}
+    try:
+        new_psets = ifcopenshell.util.element.get_psets(new_el)
+    except Exception:
+        new_psets = {}
+    if _pset_hash(old_psets) != _pset_hash(new_psets):
+        prop_changes = {}
+        all_names = set(old_psets) | set(new_psets)
+        for pn in all_names:
+            op = {k: v for k, v in old_psets.get(pn, {}).items() if k != "id"}
+            np_ = {k: v for k, v in new_psets.get(pn, {}).items() if k != "id"}
+            if pn not in old_psets:
+                prop_changes[pn] = {"_status": "added"}
+            elif pn not in new_psets:
+                prop_changes[pn] = {"_status": "deleted"}
+            else:
+                diffs = {}
+                for k in set(op) | set(np_):
+                    ov, nv = op.get(k), np_.get(k)
+                    if ov != nv:
+                        if isinstance(ov, (int, float)) and isinstance(nv, (int, float)):
+                            if abs(ov - nv) <= precision:
+                                continue
+                        diffs[k] = {"old": ov, "new": nv}
+                if diffs:
+                    prop_changes[pn] = {"_status": "modified", "properties": diffs}
+        if prop_changes:
+            changes["properties"] = prop_changes
+
+    # Type changes
+    try:
+        old_type = ifcopenshell.util.element.get_type(old_el)
+        new_type = ifcopenshell.util.element.get_type(new_el)
+    except Exception:
+        old_type = new_type = None
+    old_tid = old_type.GlobalId if old_type else None
+    new_tid = new_type.GlobalId if new_type else None
+    if old_tid != new_tid:
+        changes["type"] = {
+            "old": {"globalId": old_tid, "name": old_type.Name if old_type else None},
+            "new": {"globalId": new_tid, "name": new_type.Name if new_type else None},
+        }
+
+    # Container changes
+    try:
+        old_c = ifcopenshell.util.element.get_container(old_el)
+        new_c = ifcopenshell.util.element.get_container(new_el)
+    except Exception:
+        old_c = new_c = None
+    old_cn = old_c.Name if old_c else None
+    new_cn = new_c.Name if new_c else None
+    if old_cn != new_cn:
+        changes["container"] = {"old": old_cn, "new": new_cn}
+
+    return changes if changes else None
+
+
+def _format_element_info(el, ifc):
+    schema = ifc.schema
+    spatial = get_spatial_info(el)
+    return {
+        "globalId": el.GlobalId,
+        "expressId": el.id(),
+        "type": get_export_as(el, schema),
+        "name": el.Name or "",
+        "predefinedType": get_predefined_type(el),
+        "storey": spatial.get("storey", ""),
+    }
+
+
+_DIFF_MAX_FILE_SIZE = 300 * 1024 * 1024  # 300 MB per file
+_DIFF_MAX_RESULTS = 2000  # cap elements per category in response
+
+
+@app.post("/api/diff-ifc")
+async def diff_ifc(
+    old_file: UploadFile = File(...),
+    new_file: UploadFile = File(...),
+    filter_types: str = Form(None),
+):
+    """Compare two IFC files. Both must share the same general schema."""
+    old_path = new_path = None
+    try:
+        old_bytes = await old_file.read()
+        new_bytes = await new_file.read()
+        for label, data in [("Old", old_bytes), ("New", new_bytes)]:
+            if len(data) > _DIFF_MAX_FILE_SIZE:
+                return Response(
+                    content=json.dumps({
+                        "error": f"{label} file too large ({len(data) // (1024*1024)} MB). "
+                                 f"Max {_DIFF_MAX_FILE_SIZE // (1024*1024)} MB."
+                    }),
+                    status_code=413, media_type="application/json",
+                )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
+            tmp.write(old_bytes)
+            old_path = tmp.name
+        del old_bytes
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
+            tmp.write(new_bytes)
+            new_path = tmp.name
+        del new_bytes
+
+        try:
+            old_ifc = ifcopenshell.open(old_path)
+        except Exception as e:
+            return Response(
+                content=json.dumps({"error": f"Cannot parse old file: {e}"}),
+                status_code=400, media_type="application/json",
+            )
+        try:
+            new_ifc = ifcopenshell.open(new_path)
+        except Exception as e:
+            return Response(
+                content=json.dumps({"error": f"Cannot parse new file: {e}"}),
+                status_code=400, media_type="application/json",
+            )
+
+        # Schema compatibility gate
+        old_schema = old_ifc.schema
+        new_schema = new_ifc.schema
+        old_schema_id = _get_schema_id(old_ifc)
+        new_schema_id = _get_schema_id(new_ifc)
+
+        if old_schema != new_schema:
+            return Response(
+                content=json.dumps({
+                    "error": "schema_mismatch",
+                    "message": f"Schema mismatch: {old_schema} vs {new_schema}. Both files must use the same IFC schema.",
+                    "oldFile": {"name": old_file.filename, "schema": old_schema, "schemaId": old_schema_id},
+                    "newFile": {"name": new_file.filename, "schema": new_schema, "schemaId": new_schema_id},
+                }),
+                status_code=422, media_type="application/json",
+            )
+
+        schema_warning = None
+        if old_schema_id != new_schema_id:
+            schema_warning = f"Minor version difference: {old_schema_id} vs {new_schema_id}"
+
+        # Collect products
+        old_products = _collect_products(old_ifc)
+        new_products = _collect_products(new_ifc)
+
+        if not old_products and not new_products:
+            return Response(
+                content=json.dumps({"error": "Both files contain no diffable elements."}),
+                status_code=400, media_type="application/json",
+            )
+
+        old_guids = {e.GlobalId for e in old_products}
+        new_guids = {e.GlobalId for e in new_products}
+
+        deleted_guids = old_guids - new_guids
+        added_guids = new_guids - old_guids
+        common_guids = old_guids & new_guids
+
+        # Optional type filter
+        type_filter = set()
+        if filter_types and filter_types.strip():
+            type_filter = {t.strip() for t in filter_types.split(",") if t.strip()}
+
+        # Format added / deleted
+        added = []
+        for guid in added_guids:
+            el = new_ifc.by_guid(guid)
+            info = _format_element_info(el, new_ifc)
+            if type_filter and info["type"] not in type_filter:
+                continue
+            added.append(info)
+
+        deleted = []
+        for guid in deleted_guids:
+            el = old_ifc.by_guid(guid)
+            info = _format_element_info(el, old_ifc)
+            if type_filter and info["type"] not in type_filter:
+                continue
+            deleted.append(info)
+
+        # Diff common elements (hash+placement strategy)
+        changed = []
+        unchanged_count = 0
+        for guid in common_guids:
+            old_el = old_ifc.by_guid(guid)
+            new_el = new_ifc.by_guid(guid)
+
+            if type_filter:
+                etype = get_export_as(new_el, new_schema)
+                if etype not in type_filter:
+                    continue
+
+            detail = _diff_element_detail(old_el, new_el, old_ifc, new_ifc)
+            if detail:
+                info = _format_element_info(new_el, new_ifc)
+                info["changes"] = detail
+                changed.append(info)
+            else:
+                unchanged_count += 1
+
+        added.sort(key=lambda x: (x["type"], x["name"]))
+        deleted.sort(key=lambda x: (x["type"], x["name"]))
+        changed.sort(key=lambda x: (x["type"], x["name"]))
+
+        total_added = len(added)
+        total_deleted = len(deleted)
+        total_changed = len(changed)
+
+        # Change type summary for charts (computed before truncation)
+        change_type_summary = {}
+        for el in changed:
+            for key in el.get("changes", {}):
+                change_type_summary[key] = change_type_summary.get(key, 0) + 1
+
+        # Element type summary for charts
+        type_summary = {"added": {}, "deleted": {}, "changed": {}}
+        for el in added:
+            type_summary["added"][el["type"]] = type_summary["added"].get(el["type"], 0) + 1
+        for el in deleted:
+            type_summary["deleted"][el["type"]] = type_summary["deleted"].get(el["type"], 0) + 1
+        for el in changed:
+            type_summary["changed"][el["type"]] = type_summary["changed"].get(el["type"], 0) + 1
+
+        truncated = (total_added > _DIFF_MAX_RESULTS
+                     or total_deleted > _DIFF_MAX_RESULTS
+                     or total_changed > _DIFF_MAX_RESULTS)
+
+        return {
+            "schemaCheck": {
+                "schema": old_schema,
+                "oldSchemaId": old_schema_id,
+                "newSchemaId": new_schema_id,
+                "match": "exact" if not schema_warning else "compatible",
+                "warning": schema_warning,
+            },
+            "oldFile": {
+                "name": old_file.filename,
+                "schema": old_schema_id,
+                "totalProducts": len(old_products),
+            },
+            "newFile": {
+                "name": new_file.filename,
+                "schema": new_schema_id,
+                "totalProducts": len(new_products),
+            },
+            "summary": {
+                "addedCount": total_added,
+                "deletedCount": total_deleted,
+                "changedCount": total_changed,
+                "unchangedCount": unchanged_count,
+            },
+            "truncated": truncated,
+            "maxResults": _DIFF_MAX_RESULTS if truncated else None,
+            "changeTypeSummary": change_type_summary,
+            "typeSummary": type_summary,
+            "added": added[:_DIFF_MAX_RESULTS],
+            "deleted": deleted[:_DIFF_MAX_RESULTS],
+            "changed": changed[:_DIFF_MAX_RESULTS],
+        }
+
+    except Exception as e:
+        import traceback
+        return Response(
+            content=json.dumps({"error": str(e), "trace": traceback.format_exc()}),
+            status_code=500, media_type="application/json",
+        )
+    finally:
+        for p in (old_path, new_path):
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass

@@ -49,3 +49,5 @@ export {
   exportEditedIfc,
   closeEditSession,
 } from "./ifc-edit-api";
+
+export { diffIfcFiles } from "./ifc-diff-api";

@@ -39,6 +39,16 @@ A browser-based platform for viewing, analyzing, validating, and editing IFC bui
 - Import/export IDS XML files, XML preview, built-in templates
 - 3D integration: failed elements are highlighted directly in the viewer
 
+### IFC Diff (Model Comparison)
+- Compare two IFC files to detect **added**, **deleted**, and **changed** elements
+- Custom **hash+placement** diff algorithm — faster and more accurate than default `ifcdiff`
+- Detects changes in: attributes, placement (matrix comparison via NumPy), property sets (hash-first, detail on mismatch), type assignments, and spatial containers
+- **Schema validation gate** — both files must share the same IFC schema (IFC4 vs IFC4x3 rejected with clear error)
+- Summary charts: pie chart (overview), bar chart (changes by IFC type), change category breakdown
+- Expandable detail view for each changed element showing old → new values
+- File size limit (300 MB) and result cap (2,000 elements/category) to prevent memory issues
+- Frontend pagination for large result sets
+
 ### IFC Data Editor (Non-Geometry)
 - Edit element **attributes** (Name, Description, ObjectType, PredefinedType) and **property set values** directly from the browser
 - Backend-powered by **IfcOpenShell** — full IFC schema compliance, no data corruption
@@ -53,25 +63,25 @@ A browser-based platform for viewing, analyzing, validating, and editing IFC bui
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Browser                              │
-│  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ IfcViewer│  │ Dashboard │  │IDS Builder│  │IFC Editor │  │
-│  │(ThatOpen)│  │ (Recharts)│  │  (Modal)  │  │  (Modal)  │  │
-│  └────┬─────┘  └─────┬─────┘  └─────┬────┘  └─────┬─────┘  │
-│       │              │              │              │         │
-│  ┌────┴──────────────┴──────────────┴──────────────┴─────┐  │
-│  │              React Context (shared state)             │  │
-│  │  SelectionContext · ModelRegistry · IfcEditContext     │  │
-│  │                    · IdsBuilderContext                 │  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ ┌────────┐│
+│  │ IfcViewer│ │Dashboard │ │IDS Build.│ │IFC Edit │ │IFC Diff││
+│  │(ThatOpen)│ │(Recharts)│ │ (Modal)  │ │ (Modal) │ │(Modal) ││
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬────┘ └───┬───┘│
+│       │            │            │             │          │    │
+│  ┌────┴────────────┴────────────┴─────────────┴──────────┴─┐ │
+│  │              React Context (shared state)               │ │
+│  │  SelectionContext · ModelRegistry · IfcEditContext       │ │
+│  │              · IdsBuilderContext · IfcDiffContext        │ │
 │  └───────────────────────┬───────────────────────────────┘  │
 └──────────────────────────┼──────────────────────────────────┘
                            │  REST API (axios)
 ┌──────────────────────────┼──────────────────────────────────┐
 │                     FastAPI Backend                          │
-│  ┌───────────────┐  ┌────────────┐  ┌────────────────────┐  │
-│  │  /parse-ifc   │  │ /edit-*    │  │ /build-ids         │  │
-│  │  /health      │  │ sessions   │  │ /parse-ids         │  │
-│  │               │  │            │  │ /validate-ids      │  │
-│  └───────┬───────┘  └─────┬──────┘  └─────────┬──────────┘  │
+│  ┌─────────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────┐ │
+│  │ /parse-ifc  │ │ /edit-*  │ │ /build-ids   │ │/diff-ifc │ │
+│  │ /health     │ │ sessions │ │ /parse-ids   │ │          │ │
+│  │             │ │          │ │ /validate-ids│ │          │ │
+│  └──────┬──────┘ └─────┬────┘ └──────┬───────┘ └─────┬────┘ │
 │          │                │                    │             │
 │  ┌───────┴────────────────┴────────────────────┴──────────┐  │
 │  │              ifcopenshell + ifctester                   │  │
@@ -119,13 +129,24 @@ User uploads .ifc
                 │         ▼
                 │    GET /api/edit-session/{id}/export → download .ifc
                 │
-                └──► User opens IDS Builder
+                ├──► User opens IDS Builder
+                │         │
+                │         ▼
+                │    Build specs visually → Validate against model
+                │         │
+                │         ▼
+                │    Failed elements highlighted in 3D viewer
+                │
+                └──► User opens IFC Diff
                           │
                           ▼
-                     Build specs visually → Validate against model
+                     Upload Old + New IFC → Schema check
                           │
                           ▼
-                     Failed elements highlighted in 3D viewer
+                     POST /api/diff-ifc → hash+placement comparison
+                          │
+                          ▼
+                     Summary charts + added/deleted/changed element lists
 ```
 
 ### Edit Session Flow
@@ -165,6 +186,7 @@ Session closed  ──►  DELETE /api/edit-session/{id}  ──►  memory free
 | **3D Rendering** | Three.js 0.183 | WebGL rendering |
 | **Charts** | Recharts 3 | Interactive data visualization |
 | **Layout** | react-resizable-panels | Resizable viewer/dashboard split |
+| **Numerical** | NumPy | Placement matrix comparison for IFC diff |
 | **Backend** | FastAPI + Uvicorn | REST API server |
 
 ---
@@ -174,7 +196,8 @@ Session closed  ──►  DELETE /api/edit-session/{id}  ──►  memory free
 ```
 IFCDashboard/
 ├── backend/
-│   ├── main.py                         # FastAPI: parse, edit, IDS endpoints
+│   ├── main.py                         # FastAPI: parse, edit, IDS, diff endpoints
+│   ├── benchmark_diff.py               # Diff algorithm benchmark suite
 │   └── requirements.txt
 ├── frontend/
 │   ├── public/
@@ -184,6 +207,7 @@ IFCDashboard/
 │   └── src/
 │       ├── components/
 │       │   ├── IfcViewer.jsx           # 3D viewer (That Open engine)
+│       │   ├── IfcDiffPanel.jsx        # IFC diff comparison UI
 │       │   ├── Dashboard.jsx           # Charts, stats, element table
 │       │   ├── DashboardPanel.jsx      # Collapsible panel wrapper
 │       │   ├── ElementTable.jsx        # Searchable element table
@@ -209,11 +233,13 @@ IFCDashboard/
 │       │   ├── SelectionContext.jsx     # Selection, filter, isolation state
 │       │   ├── ModelRegistryContext.jsx # Loaded models, federation merge
 │       │   ├── IfcEditContext.jsx       # Edit session management
+│       │   ├── IfcDiffContext.jsx       # Diff state management
 │       │   └── IdsBuilderContext.jsx    # IDS document state
 │       ├── lib/
 │       │   ├── ifc-filter-core.js      # Pure JS: filtering, color maps
 │       │   ├── ifc-viewer-bridge.js    # That Open highlight/isolate API
 │       │   ├── ifc-edit-api.js         # HTTP client for edit endpoints
+│       │   ├── ifc-diff-api.js         # HTTP client for diff endpoint
 │       │   ├── useIfcFilter.js         # React hook: filter logic
 │       │   ├── useIfcHighlighter.js    # React hook: 3D highlight sync
 │       │   ├── ids-constants.js        # IFC entity/type constants for IDS
@@ -285,6 +311,12 @@ Open **http://localhost:3000** in your browser.
 | `POST` | `/api/parse-ids` | Parse IDS XML file to JSON for the editor |
 | `POST` | `/api/validate-ids` | Validate an IFC file against IDS specifications |
 
+### IFC Diff (Model Comparison)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/diff-ifc` | Compare two IFC files — returns added, deleted, changed elements with detailed change breakdown |
+
 ---
 
 ## What Makes This Different
@@ -299,6 +331,7 @@ Open **http://localhost:3000** in your browser.
 | **Open standards** | IFC2x3/4/4x3, IDS 1.0, buildingSMART | Proprietary formats |
 | **Geometry untouched** | Edit data only, export clean IFC | Risk of geometry corruption |
 | **Session-based editing** | Edit many elements, export once | Re-upload per change |
+| **Model comparison** | Hash+placement diff with schema gate | Geometry tessellation (slow) or text diff (inaccurate) |
 
 ---
 

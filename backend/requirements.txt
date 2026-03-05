@@ -3,3 +3,4 @@ uvicorn[standard]
 ifcopenshell
 ifctester
 python-multipart
+numpy
