@@ -2,10 +2,12 @@ from fastapi import FastAPI, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 import ifcopenshell
+import ifcopenshell.api
 import ifcopenshell.util.element as element_util
 import tempfile
 import os
 import json
+import time
 from uuid import uuid4
 from datetime import date
 
@@ -276,6 +278,205 @@ async def parse_ifc(file: UploadFile = File(...), model_id: str = Form(None)):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "ifctester": HAS_IFCTESTER}
+
+
+# ─── IFC Edit Session Endpoints ───────────────────────────────────
+
+_edit_sessions: dict[str, dict] = {}
+_SESSION_TTL = 1800  # 30 minutes
+
+def _cleanup_sessions():
+    """Remove sessions older than TTL."""
+    now = time.time()
+    expired = [sid for sid, s in _edit_sessions.items() if now - s["ts"] > _SESSION_TTL]
+    for sid in expired:
+        _edit_sessions.pop(sid, None)
+
+
+def _get_session(session_id: str):
+    s = _edit_sessions.get(session_id)
+    if not s:
+        return None
+    s["ts"] = time.time()
+    return s
+
+
+@app.post("/api/edit-session/open")
+async def open_edit_session(file: UploadFile = File(...)):
+    """Upload an IFC file and open an edit session."""
+    _cleanup_sessions()
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        ifc = ifcopenshell.open(tmp_path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    session_id = str(uuid4())
+    _edit_sessions[session_id] = {
+        "ifc": ifc,
+        "fileName": file.filename or "model.ifc",
+        "history": [],
+        "ts": time.time(),
+    }
+
+    return {
+        "sessionId": session_id,
+        "schema": ifc.schema,
+        "fileName": file.filename,
+    }
+
+
+@app.post("/api/edit-session/{session_id}/edit")
+async def apply_edits(session_id: str, payload: dict = Body(...)):
+    """Apply a batch of edits to the IFC model in the session.
+
+    payload = { "edits": [ { "globalId": "...", "Name": "...", ... , "psetEdits": { ... } } ] }
+    """
+    sess = _get_session(session_id)
+    if not sess:
+        return Response(content="Session not found", status_code=404)
+
+    ifc = sess["ifc"]
+    results = []
+
+    for edit in payload.get("edits", []):
+        guid = edit.get("globalId")
+        if not guid:
+            results.append({"globalId": guid, "status": "error", "message": "Missing globalId"})
+            continue
+
+        try:
+            entity = ifc.by_guid(guid)
+        except Exception:
+            results.append({"globalId": guid, "status": "error", "message": "Entity not found"})
+            continue
+
+        changes_applied = {}
+
+        for attr in ("Name", "Description", "ObjectType"):
+            if attr in edit:
+                old_val = getattr(entity, attr, None)
+                new_val = edit[attr] if edit[attr] != "" else None
+                setattr(entity, attr, new_val)
+                changes_applied[attr] = {"old": old_val, "new": new_val}
+
+        if "PredefinedType" in edit and hasattr(entity, "PredefinedType"):
+            old_val = getattr(entity, "PredefinedType", None)
+            new_val = edit["PredefinedType"] if edit["PredefinedType"] != "" else None
+            try:
+                entity.PredefinedType = new_val
+                changes_applied["PredefinedType"] = {"old": old_val, "new": new_val}
+            except Exception:
+                pass
+
+        pset_edits = edit.get("psetEdits", {})
+        for pset_name, props in pset_edits.items():
+            if not hasattr(entity, "IsDefinedBy"):
+                continue
+            for rel in entity.IsDefinedBy:
+                if not rel.is_a("IfcRelDefinesByProperties"):
+                    continue
+                pset = rel.RelatingPropertyDefinition
+                if not pset.is_a("IfcPropertySet") or pset.Name != pset_name:
+                    continue
+                try:
+                    ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset, properties=props)
+                    changes_applied[f"pset:{pset_name}"] = props
+                except Exception as e:
+                    changes_applied[f"pset:{pset_name}"] = {"error": str(e)}
+
+        sess["history"].append({
+            "globalId": guid,
+            "entityName": getattr(entity, "Name", "") or "",
+            "entityType": entity.is_a(),
+            "changes": changes_applied,
+            "timestamp": time.time(),
+        })
+
+        results.append({"globalId": guid, "status": "ok", "applied": changes_applied})
+
+    return {"results": results, "totalHistory": len(sess["history"])}
+
+
+@app.get("/api/edit-session/{session_id}/history")
+async def get_edit_history(session_id: str):
+    """Return the edit history for the session."""
+    sess = _get_session(session_id)
+    if not sess:
+        return Response(content="Session not found", status_code=404)
+    return {"history": sess["history"], "total": len(sess["history"])}
+
+
+@app.get("/api/edit-session/{session_id}/element/{global_id}")
+async def get_element_data(session_id: str, global_id: str):
+    """Get the current (possibly edited) data for a single element."""
+    sess = _get_session(session_id)
+    if not sess:
+        return Response(content="Session not found", status_code=404)
+
+    ifc = sess["ifc"]
+    try:
+        entity = ifc.by_guid(global_id)
+    except Exception:
+        return Response(content="Entity not found", status_code=404)
+
+    return {
+        "globalId": entity.GlobalId,
+        "expressId": entity.id(),
+        "type": entity.is_a(),
+        "Name": entity.Name or "",
+        "Description": entity.Description or "",
+        "ObjectType": getattr(entity, "ObjectType", "") or "",
+        "PredefinedType": get_predefined_type(entity),
+        "propertySets": get_psets(entity),
+        "materials": get_materials(entity),
+        "spatial": get_spatial_info(entity),
+    }
+
+
+@app.get("/api/edit-session/{session_id}/export")
+async def export_edited_ifc(session_id: str):
+    """Export the modified IFC file."""
+    sess = _get_session(session_id)
+    if not sess:
+        return Response(content="Session not found", status_code=404)
+
+    ifc = sess["ifc"]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as out:
+        out_path = out.name
+    try:
+        ifc.write(out_path)
+        with open(out_path, "rb") as f:
+            data = f.read()
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+
+    base_name = sess["fileName"].rsplit(".", 1)[0] if "." in sess["fileName"] else sess["fileName"]
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{base_name}_edited.ifc"'},
+    )
+
+
+@app.delete("/api/edit-session/{session_id}")
+async def close_edit_session(session_id: str):
+    """Close the edit session and free memory."""
+    removed = _edit_sessions.pop(session_id, None)
+    return {"status": "closed" if removed else "not_found"}
 
 
 # ─── IDS Builder Endpoints ────────────────────────────────────────

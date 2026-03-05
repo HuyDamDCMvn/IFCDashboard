@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { useSelection } from "../contexts/SelectionContext";
+import { useIfcEdit } from "../contexts/IfcEditContext";
 
 export default function ElementTable({ elements, multiModel = false }) {
   const [search, setSearch] = useState("");
@@ -10,6 +11,7 @@ export default function ElementTable({ elements, multiModel = false }) {
   const pageSize = 50;
 
   const { selectedExpressID, selectedModelId, filterKey, toggleFilter } = useSelection();
+  const { openElementEditor } = useIfcEdit();
 
   const types = useMemo(() => {
     const set = new Set(elements.map((e) => e.type));
@@ -54,6 +56,11 @@ export default function ElementTable({ elements, multiModel = false }) {
       toggleFilter([el.expressId], label, key, globalIds);
     },
     [toggleFilter]
+  );
+
+  const handleEdit = useCallback(
+    (el) => openElementEditor(el),
+    [openElementEditor]
   );
 
   const colSpan = multiModel ? 8 : 7;
@@ -109,7 +116,7 @@ export default function ElementTable({ elements, multiModel = false }) {
               {multiModel && <th style={thStyle}>Model</th>}
               <th style={thStyle}>Materials</th>
               <th style={thStyle}>Props</th>
-              <th style={{ ...thStyle, width: 48 }}></th>
+              <th style={{ ...thStyle, width: 90 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -126,6 +133,7 @@ export default function ElementTable({ elements, multiModel = false }) {
                   isFiltered={filterKey === `element:${el._modelId || ""}:${el.expressId}`}
                   onToggle={() => setExpandedRow(expandedRow === rowKey ? null : rowKey)}
                   onLocate={() => handleLocate(el)}
+                  onEdit={() => handleEdit(el)}
                 />
               );
             })}
@@ -151,7 +159,7 @@ export default function ElementTable({ elements, multiModel = false }) {
   );
 }
 
-function ElementRow({ el, multiModel, colSpan, isExpanded, isSelected, isFiltered, onToggle, onLocate }) {
+function ElementRow({ el, multiModel, colSpan, isExpanded, isSelected, isFiltered, onToggle, onLocate, onEdit }) {
   const propCount = Object.values(el.propertySets || {}).reduce(
     (acc, pset) => acc + Object.keys(pset).length, 0
   );
@@ -203,7 +211,7 @@ function ElementRow({ el, multiModel, colSpan, isExpanded, isSelected, isFiltere
         )}
         <td style={tdStyle}>{el.materials?.join(", ") || "-"}</td>
         <td style={tdStyle}>{propCount}</td>
-        <td style={tdStyle}>
+        <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
           <button
             title="Locate in 3D viewer"
             onClick={(e) => { e.stopPropagation(); onLocate(); }}
@@ -213,9 +221,17 @@ function ElementRow({ el, multiModel, colSpan, isExpanded, isSelected, isFiltere
               border: "none", borderRadius: 6, padding: "4px 8px",
               cursor: "pointer", fontSize: 12, fontWeight: 600,
               transition: "all 0.15s",
+              marginRight: 4,
             }}
           >
             3D
+          </button>
+          <button
+            title="Edit element data"
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            style={editRowBtnStyle}
+          >
+            &#9998;
           </button>
         </td>
       </tr>
@@ -294,4 +310,16 @@ const predefBadgeStyle = {
 const btnStyle = {
   padding: "6px 16px", borderRadius: 6, border: "1px solid #ddd",
   background: "#fff", cursor: "pointer", fontSize: 13,
+};
+
+const editRowBtnStyle = {
+  background: "#eef2ff",
+  color: "#4f46e5",
+  border: "none",
+  borderRadius: 6,
+  padding: "4px 8px",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 600,
+  transition: "all 0.15s",
 };

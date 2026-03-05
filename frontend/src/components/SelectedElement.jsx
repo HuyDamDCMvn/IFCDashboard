@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useIfcEdit } from "../contexts/IfcEditContext";
 
 export default function SelectedElement({ element }) {
   const [collapsed, setCollapsed] = useState({});
+  const { openElementEditor } = useIfcEdit();
 
   if (!element) return null;
 
@@ -14,7 +16,7 @@ export default function SelectedElement({ element }) {
 
   return (
     <div style={panelStyle}>
-      {/* Close hint */}
+      {/* Header with Edit button */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
         marginBottom: 8,
@@ -22,6 +24,13 @@ export default function SelectedElement({ element }) {
         <span style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>
           Element Properties
         </span>
+        <button
+          onClick={() => openElementEditor(element)}
+          style={editBtnStyle}
+          title="Edit this element's data"
+        >
+          &#9998; Edit
+        </button>
       </div>
 
       {/* ID Header */}
@@ -183,4 +192,19 @@ const propRowStyle = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+};
+
+const editBtnStyle = {
+  padding: "3px 10px",
+  borderRadius: 6,
+  border: "1px solid #c7d2fe",
+  background: "#eef2ff",
+  color: "#4f46e5",
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  transition: "all 0.15s",
 };

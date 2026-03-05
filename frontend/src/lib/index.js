@@ -40,3 +40,12 @@ export {
 
 export { useIfcFilter } from "./useIfcFilter";
 export { useIfcHighlighter } from "./useIfcHighlighter";
+
+export {
+  openEditSession,
+  applyEdits,
+  getElementData,
+  getEditHistory,
+  exportEditedIfc,
+  closeEditSession,
+} from "./ifc-edit-api";

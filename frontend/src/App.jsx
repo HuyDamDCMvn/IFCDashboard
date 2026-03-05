@@ -7,6 +7,10 @@ import SelectedElement from "./components/SelectedElement";
 import ModelManager from "./components/ModelManager";
 import { SelectionProvider, useSelection } from "./contexts/SelectionContext";
 import { ModelRegistryProvider, useModelRegistry } from "./contexts/ModelRegistryContext";
+import { IfcEditProvider, useIfcEdit } from "./contexts/IfcEditContext";
+import PropertyEditor from "./components/ifc-editor/PropertyEditor";
+import EditHistory from "./components/ifc-editor/EditHistory";
+import ExportButton from "./components/ifc-editor/ExportButton";
 
 const IdsBuilder = lazy(() => import("./components/ids-builder/IdsBuilder"));
 
@@ -16,7 +20,9 @@ function App() {
   return (
     <SelectionProvider>
       <ModelRegistryProvider>
-        <AppContent />
+        <IfcEditProvider>
+          <AppContent />
+        </IfcEditProvider>
       </ModelRegistryProvider>
     </SelectionProvider>
   );
@@ -48,7 +54,8 @@ function AppContent() {
     clearFilter,
   } = useSelection();
 
-  const { allModelsList, mergedData, addModel } = useModelRegistry();
+  const { allModelsList, mergedData, addModel, models } = useModelRegistry();
+  const { isSessionOpen, startSession, editingElement } = useIfcEdit();
 
   const hasModels = allModelsList.length > 0;
 
@@ -150,6 +157,12 @@ function AppContent() {
           IDS Builder
         </button>
 
+        {/* Edit Mode toggle */}
+        {hasModels && !isSessionOpen && (
+          <EditModeButton models={models} startSession={startSession} />
+        )}
+        {isSessionOpen && <ExportButton />}
+
         {/* Panel toggle controls */}
         {hasModels && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
@@ -230,6 +243,9 @@ function AppContent() {
         </Suspense>
       )}
 
+      {/* Property Editor Modal */}
+      {editingElement && <PropertyEditor />}
+
       {/* Main Content */}
       <main style={{ flex: 1, overflow: "hidden" }}>
         {!hasModels ? (
@@ -258,6 +274,11 @@ function AppContent() {
                   <div style={{ height: "100%", position: "relative" }}>
                     <IfcViewer />
                     <SelectedElement element={selectedElementInfo} />
+                    {isSessionOpen && (
+                      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 40 }}>
+                        <EditHistory />
+                      </div>
+                    )}
                   </div>
                 </Panel>
 
@@ -340,6 +361,36 @@ function EmptyState({ onFileSelect, loading, error }) {
   );
 }
 
+function EditModeButton({ models, startSession }) {
+  const [starting, setStarting] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    const entries = [...models.values()];
+    if (entries.length === 0) return;
+
+    // Use the first model's file to start the session
+    const entry = entries[0];
+    if (!entry.file) return;
+
+    setStarting(true);
+    try {
+      await startSession(entry.file);
+    } catch {}
+    setStarting(false);
+  }, [models, startSession]);
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={starting}
+      style={editModeButtonStyle}
+      title="Start an edit session — modify element data and export updated IFC"
+    >
+      {starting ? "Starting..." : "Edit Mode"}
+    </button>
+  );
+}
+
 function modeColor(mode) {
   switch (mode) {
     case "highlight": return "rgba(255, 140, 0, 0.7)";
@@ -418,6 +469,18 @@ const errorStyle = {
   margin: 24, padding: 16, background: "#fef2f2",
   borderRadius: 8, color: "#dc2626", border: "1px solid #fecaca",
   whiteSpace: "pre-line",
+};
+
+const editModeButtonStyle = {
+  padding: "6px 16px",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(245,158,11,0.25), rgba(239,68,68,0.2))",
+  color: "#fbbf24",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+  border: "1px solid rgba(245,158,11,0.4)",
+  transition: "all 0.2s",
 };
 
 const uploadBtnStyle = {
