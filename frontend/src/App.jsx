@@ -225,6 +225,7 @@ function AppContent() {
           <IdsBuilder
             onClose={() => setIdsBuilderOpen(false)}
             modelData={mergedData}
+            modelsList={allModelsList}
           />
         </Suspense>
       )}

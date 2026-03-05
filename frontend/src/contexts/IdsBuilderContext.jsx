@@ -1,14 +1,29 @@
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
-import { createEmptyIds, createEmptySpec, createEmptyFacet, newUUID } from "../lib/ids-constants";
+import { createEmptyIds, createEmptySpec, createEmptyFacet, newUUID, IFC_VERSIONS } from "../lib/ids-constants";
 
 const IdsBuilderContext = createContext(null);
 
 const STORAGE_KEY = "ids-builder-doc";
 
+const VERSION_MIGRATION = { "IFC4X3": "IFC4X3_ADD2" };
+
+function migrateDoc(doc) {
+  if (!doc) return doc;
+  (doc.specifications || []).forEach(s => {
+    if (Array.isArray(s.ifcVersion)) {
+      s.ifcVersion = [...new Set(
+        s.ifcVersion.map(v => VERSION_MIGRATION[v] || v)
+      )].filter(v => IFC_VERSIONS.includes(v));
+      if (s.ifcVersion.length === 0) s.ifcVersion = ["IFC4"];
+    }
+  });
+  return doc;
+}
+
 function loadSaved() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? migrateDoc(JSON.parse(raw)) : null;
   } catch { return null; }
 }
 
@@ -149,6 +164,7 @@ export function IdsBuilderProvider({ children }) {
   }, []);
 
   const loadDocument = useCallback((doc) => {
+    migrateDoc(doc);
     doc.specifications.forEach(s => {
       if (!s.id) s.id = newUUID();
       (s.applicability || []).forEach(f => { if (!f.id) f.id = newUUID(); });

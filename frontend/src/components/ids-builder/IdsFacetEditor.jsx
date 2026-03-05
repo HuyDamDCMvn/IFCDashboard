@@ -1,10 +1,12 @@
 import { useCallback, useMemo } from "react";
 import {
   IFC_ENTITIES, IFC_DATA_TYPES, IFC_ATTRIBUTES,
-  COMMON_PSETS, CARDINALITIES, SPATIAL_ENTITIES, PARTOF_RELATIONS,
+  COMMON_PSETS, CARDINALITIES, PARTOF_RELATIONS,
   FACET_TYPES,
 } from "../../lib/ids-constants";
 import IdsValueEditor from "./IdsValueEditor";
+
+const PARTOF_CARDINALITIES = CARDINALITIES.filter(c => c.key !== "optional");
 
 export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParams, onRemove, modelData }) {
   const facetMeta = FACET_TYPES.find(f => f.key === facet.type);
@@ -82,6 +84,8 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
   };
   const color = colorMap[facet.type] || "#666";
 
+  const cardinalityOptions = facet.type === "partOf" ? PARTOF_CARDINALITIES : CARDINALITIES;
+
   return (
     <div style={{
       padding: 12, borderRadius: 8,
@@ -112,7 +116,7 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
               background: "#fff", cursor: "pointer",
             }}
           >
-            {CARDINALITIES.map(c => (
+            {cardinalityOptions.map(c => (
               <option key={c.key} value={c.key}>{c.label}</option>
             ))}
           </select>
@@ -134,32 +138,26 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
 
       {/* ENTITY */}
       {facet.type === "entity" && (
-        <div style={fieldsGrid}>
-          <div>
-            <label style={labelStyle}>IFC Class</label>
-            <input
-              value={p.name || ""}
-              onChange={e => setP({ name: e.target.value.toUpperCase() })}
-              list="entity-list"
-              style={inputStyle}
-              placeholder="IFCWALL"
-            />
-            <datalist id="entity-list">
-              {allEntities.map(e => <option key={e} value={e} />)}
-            </datalist>
-          </div>
-          <div>
-            <label style={labelStyle}>Predefined Type (optional)</label>
-            <input
-              value={p.predefinedType || ""}
-              onChange={e => setP({ predefinedType: e.target.value.toUpperCase() })}
-              list="predef-list"
-              style={inputStyle}
-              placeholder="e.g. PARTITIONING"
-            />
-            <datalist id="predef-list">
-              {modelPredefinedTypes.map(pt => <option key={pt} value={pt} />)}
-            </datalist>
+        <div>
+          <div style={fieldsGrid}>
+            <div>
+              <label style={labelStyle}>IFC Class</label>
+              <IdsValueEditor
+                value={p.name || ""}
+                onChange={v => setP({ name: typeof v === "string" ? v.toUpperCase() : v })}
+                suggestions={allEntities}
+                placeholder="IFCWALL"
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Predefined Type (optional)</label>
+              <IdsValueEditor
+                value={p.predefinedType || ""}
+                onChange={v => setP({ predefinedType: typeof v === "string" ? v.toUpperCase() : v })}
+                suggestions={modelPredefinedTypes}
+                placeholder="e.g. PARTITIONING"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -170,14 +168,12 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
           <div style={fieldsGrid}>
             <div>
               <label style={labelStyle}>Attribute Name</label>
-              <select
+              <IdsValueEditor
                 value={p.name || ""}
-                onChange={e => setP({ name: e.target.value })}
-                style={inputStyle}
-              >
-                <option value="">Select...</option>
-                {IFC_ATTRIBUTES.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+                onChange={v => setP({ name: v })}
+                suggestions={IFC_ATTRIBUTES}
+                placeholder="e.g. Name"
+              />
             </div>
           </div>
           <div style={{ marginTop: 8 }}>
@@ -193,29 +189,21 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
           <div style={fieldsGrid}>
             <div>
               <label style={labelStyle}>Property Set</label>
-              <input
+              <IdsValueEditor
                 value={p.propertySet || ""}
-                onChange={e => setP({ propertySet: e.target.value })}
-                list="pset-list"
-                style={inputStyle}
+                onChange={v => setP({ propertySet: v })}
+                suggestions={allPsetNames}
                 placeholder="Pset_WallCommon"
               />
-              <datalist id="pset-list">
-                {allPsetNames.map(ps => <option key={ps} value={ps} />)}
-              </datalist>
             </div>
             <div>
               <label style={labelStyle}>Property Name</label>
-              <input
+              <IdsValueEditor
                 value={p.baseName || ""}
-                onChange={e => setP({ baseName: e.target.value })}
-                list="prop-list"
-                style={inputStyle}
+                onChange={v => setP({ baseName: v })}
+                suggestions={getPropNames(typeof p.propertySet === "string" ? p.propertySet : "")}
                 placeholder="FireRating"
               />
-              <datalist id="prop-list">
-                {getPropNames(p.propertySet).map(pn => <option key={pn} value={pn} />)}
-              </datalist>
             </div>
           </div>
           <div style={{ ...fieldsGrid, marginTop: 8 }}>
@@ -230,6 +218,15 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
                 {IFC_DATA_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
               </select>
             </div>
+            <div>
+              <label style={labelStyle}>URI (optional)</label>
+              <input
+                value={p.uri || ""}
+                onChange={e => setP({ uri: e.target.value })}
+                style={inputStyle}
+                placeholder="e.g. https://identifier.buildingsmart.org/..."
+              />
+            </div>
           </div>
           <div style={{ marginTop: 8 }}>
             <label style={labelStyle}>Value</label>
@@ -240,19 +237,29 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
 
       {/* CLASSIFICATION */}
       {facet.type === "classification" && (
-        <div style={fieldsGrid}>
-          <div>
-            <label style={labelStyle}>System</label>
-            <input
-              value={p.system || ""}
-              onChange={e => setP({ system: e.target.value })}
-              style={inputStyle}
-              placeholder="Uniclass 2015"
-            />
+        <div>
+          <div style={fieldsGrid}>
+            <div>
+              <label style={labelStyle}>System</label>
+              <IdsValueEditor
+                value={p.system || ""}
+                onChange={v => setP({ system: v })}
+                placeholder="Uniclass 2015"
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Value</label>
+              <IdsValueEditor value={p.value} onChange={v => setP({ value: v })} />
+            </div>
           </div>
-          <div>
-            <label style={labelStyle}>Value</label>
-            <IdsValueEditor value={p.value} onChange={v => setP({ value: v })} />
+          <div style={{ marginTop: 8 }}>
+            <label style={labelStyle}>URI (optional)</label>
+            <input
+              value={p.uri || ""}
+              onChange={e => setP({ uri: e.target.value })}
+              style={inputStyle}
+              placeholder="e.g. https://identifier.buildingsmart.org/..."
+            />
           </div>
         </div>
       )}
@@ -260,41 +267,66 @@ export default function IdsFacetEditor({ facet, section, onUpdate, onUpdateParam
       {/* MATERIAL */}
       {facet.type === "material" && (
         <div>
-          <label style={labelStyle}>Material Value</label>
-          <input
-            value={typeof p.value === "string" ? p.value : ""}
-            onChange={e => setP({ value: e.target.value })}
-            list="material-list"
-            style={inputStyle}
-            placeholder="Any material (leave empty) or specific name"
-          />
-          <datalist id="material-list">
-            {modelMaterials.map(m => <option key={m} value={m} />)}
-          </datalist>
+          <div>
+            <label style={labelStyle}>Material Value</label>
+            <IdsValueEditor
+              value={p.value ?? ""}
+              onChange={v => setP({ value: v })}
+              suggestions={modelMaterials}
+              placeholder="Any material (leave empty) or specific name"
+            />
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <label style={labelStyle}>URI (optional)</label>
+            <input
+              value={p.uri || ""}
+              onChange={e => setP({ uri: e.target.value })}
+              style={inputStyle}
+              placeholder="e.g. https://identifier.buildingsmart.org/..."
+            />
+          </div>
         </div>
       )}
 
       {/* PARTOF */}
       {facet.type === "partOf" && (
-        <div style={fieldsGrid}>
-          <div>
-            <label style={labelStyle}>Parent Entity</label>
-            <select
-              value={p.name || ""}
-              onChange={e => setP({ name: e.target.value })}
-              style={inputStyle}
-            >
-              {SPATIAL_ENTITIES.map(se => <option key={se} value={se}>{se}</option>)}
-            </select>
+        <div>
+          <div style={fieldsGrid}>
+            <div>
+              <label style={labelStyle}>Parent Entity</label>
+              <input
+                value={p.name || ""}
+                onChange={e => setP({ name: e.target.value.toUpperCase() })}
+                list="partof-entity-list"
+                style={inputStyle}
+                placeholder="IFCBUILDINGSTOREY"
+              />
+              <datalist id="partof-entity-list">
+                {allEntities.map(e => <option key={e} value={e} />)}
+              </datalist>
+            </div>
+            <div>
+              <label style={labelStyle}>Predefined Type (optional)</label>
+              <input
+                value={p.predefinedType || ""}
+                onChange={e => setP({ predefinedType: e.target.value.toUpperCase() })}
+                list="partof-predef-list"
+                style={inputStyle}
+                placeholder="e.g. USERDEFINED"
+              />
+              <datalist id="partof-predef-list">
+                {modelPredefinedTypes.map(pt => <option key={pt} value={pt} />)}
+              </datalist>
+            </div>
           </div>
-          <div>
-            <label style={labelStyle}>Relation</label>
+          <div style={{ marginTop: 8 }}>
+            <label style={labelStyle}>Relation (optional — leave empty for any)</label>
             <select
               value={p.relation || ""}
               onChange={e => setP({ relation: e.target.value })}
               style={inputStyle}
             >
-              <option value="">Any</option>
+              <option value="">Any (all 6 relations)</option>
               {PARTOF_RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>

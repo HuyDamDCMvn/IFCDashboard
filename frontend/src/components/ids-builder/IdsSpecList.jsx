@@ -44,7 +44,7 @@ export default function IdsSpecList() {
                 fontSize: 10, fontWeight: 700, color: "#999",
                 minWidth: 18,
               }}>
-                {idx + 1}.
+                {spec.identifier || `${idx + 1}.`}
               </span>
               <span style={{
                 flex: 1, fontSize: 12, fontWeight: isSelected ? 600 : 400,

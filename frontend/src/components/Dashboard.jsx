@@ -82,7 +82,7 @@ function renderPieLabel({ cx, cy, midAngle, outerRadius, name, value, percent })
 }
 
 function DashboardInner({ data, containerWidth }) {
-  const { filterKey, toggleFilter } = useSelection();
+  const { filterKey, toggleFilter, setClassColorMap } = useSelection();
   const { allModelsList, visibleModels, focusedModelId } = useModelRegistry();
 
   const stored = useMemo(() => loadPrefs(), []);
@@ -129,6 +129,10 @@ function DashboardInner({ data, containerWidth }) {
     { toggleFilter },
     filterKey
   );
+
+  useEffect(() => {
+    setClassColorMap(classColorMap);
+  }, [classColorMap, setClassColorMap]);
 
   const toggleClass = useCallback((cls) => {
     setClassFilter(prev => {

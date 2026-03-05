@@ -1,4 +1,5 @@
 import { useIdsBuilder } from "../../contexts/IdsBuilderContext";
+import { IDS_PURPOSES, IDS_MILESTONES } from "../../lib/ids-constants";
 
 export default function IdsInfoPanel() {
   const { idsDoc, updateInfo } = useIdsBuilder();
@@ -14,6 +15,14 @@ export default function IdsInfoPanel() {
         onChange={e => updateInfo({ title: e.target.value })}
         style={inputStyle}
         placeholder="My IDS"
+      />
+
+      <label style={labelStyle}>Copyright</label>
+      <input
+        value={info.copyright || ""}
+        onChange={e => updateInfo({ copyright: e.target.value })}
+        style={inputStyle}
+        placeholder="e.g. Example Company Pty Ltd"
       />
 
       <label style={labelStyle}>Version</label>
@@ -48,6 +57,30 @@ export default function IdsInfoPanel() {
         onChange={e => updateInfo({ date: e.target.value })}
         style={inputStyle}
       />
+
+      <label style={labelStyle}>Purpose</label>
+      <input
+        value={info.purpose || ""}
+        onChange={e => updateInfo({ purpose: e.target.value })}
+        list="purpose-list"
+        style={inputStyle}
+        placeholder="e.g. quantity take-off, coordination"
+      />
+      <datalist id="purpose-list">
+        {IDS_PURPOSES.map(p => <option key={p} value={p} />)}
+      </datalist>
+
+      <label style={labelStyle}>Milestone</label>
+      <input
+        value={info.milestone || ""}
+        onChange={e => updateInfo({ milestone: e.target.value })}
+        list="milestone-list"
+        style={inputStyle}
+        placeholder="e.g. Schematic Design, LOD 300"
+      />
+      <datalist id="milestone-list">
+        {IDS_MILESTONES.map(m => <option key={m} value={m} />)}
+      </datalist>
     </div>
   );
 }

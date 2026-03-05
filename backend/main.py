@@ -297,19 +297,29 @@ def _build_restriction(val_def):
             r.options = {"pattern": val_def.get("pattern", "")}
         elif rtype == "bounds":
             opts = {}
-            if val_def.get("minInclusive") not in (None, ""):
-                opts["minInclusive"] = val_def["minInclusive"]
-            if val_def.get("maxInclusive") not in (None, ""):
-                opts["maxInclusive"] = val_def["maxInclusive"]
+            for k in ("minInclusive", "maxInclusive", "minExclusive", "maxExclusive"):
+                if val_def.get(k) not in (None, ""):
+                    opts[k] = val_def[k]
             r.options = opts
         elif rtype == "length":
             opts = {}
+            if val_def.get("length") not in (None, ""):
+                opts["length"] = val_def["length"]
             if val_def.get("minLength") not in (None, ""):
                 opts["minLength"] = val_def["minLength"]
             if val_def.get("maxLength") not in (None, ""):
                 opts["maxLength"] = val_def["maxLength"]
             r.options = opts
         return r
+    return None
+
+
+def _resolve_param(val):
+    """Resolve a facet param that may be a simple string or a restriction dict."""
+    if isinstance(val, dict) and val.get("type"):
+        return _build_restriction(val)
+    if isinstance(val, str):
+        return val if val else None
     return None
 
 
@@ -322,21 +332,21 @@ def _build_facet(fdef):
 
     if t == "entity":
         return ifctester_ids.Entity(
-            name=p.get("name", "IFCWALL"),
-            predefinedType=p.get("predefinedType") or None,
+            name=_resolve_param(p.get("name")) or "IFCWALL",
+            predefinedType=_resolve_param(p.get("predefinedType")),
             instructions=instr,
         )
     elif t == "attribute":
         return ifctester_ids.Attribute(
-            name=p.get("name", "Name"),
+            name=_resolve_param(p.get("name")) or "Name",
             value=_build_restriction(p.get("value")),
             cardinality=card,
             instructions=instr,
         )
     elif t == "property":
         return ifctester_ids.Property(
-            propertySet=p.get("propertySet", ""),
-            baseName=p.get("baseName", ""),
+            propertySet=_resolve_param(p.get("propertySet")) or "",
+            baseName=_resolve_param(p.get("baseName")) or "",
             value=_build_restriction(p.get("value")),
             dataType=p.get("dataType") or None,
             uri=p.get("uri") or None,
@@ -345,7 +355,7 @@ def _build_facet(fdef):
         )
     elif t == "classification":
         return ifctester_ids.Classification(
-            system=p.get("system") or None,
+            system=_resolve_param(p.get("system")),
             value=_build_restriction(p.get("value")),
             uri=p.get("uri") or None,
             cardinality=card,
@@ -360,7 +370,7 @@ def _build_facet(fdef):
         )
     elif t == "partOf":
         return ifctester_ids.PartOf(
-            name=p.get("name", "IFCBUILDINGSTOREY"),
+            name=p.get("name") or "IFCBUILDINGSTOREY",
             predefinedType=p.get("predefinedType") or None,
             relation=p.get("relation") or None,
             cardinality=card,
@@ -375,20 +385,38 @@ def _json_to_ids(payload: dict):
         raise RuntimeError("ifctester not installed")
 
     info = payload.get("info", {})
-    specs = ifctester_ids.Ids(
+    ids_kwargs = dict(
         title=info.get("title", "Untitled"),
         version=info.get("version", "1.0"),
         author=info.get("author", ""),
         description=info.get("description", ""),
         date=info.get("date", str(date.today())),
     )
+    for extra_key in ("copyright", "purpose", "milestone"):
+        val = info.get(extra_key)
+        if val:
+            ids_kwargs[extra_key] = val
+
+    specs = ifctester_ids.Ids(**ids_kwargs)
 
     for sdef in payload.get("specifications", []):
-        spec = ifctester_ids.Specification(
+        spec_kwargs = dict(
             name=sdef.get("name", "Untitled"),
             description=sdef.get("description") or None,
             ifcVersion=sdef.get("ifcVersion", ["IFC4"]),
         )
+        if sdef.get("instructions"):
+            spec_kwargs["instructions"] = sdef["instructions"]
+        if sdef.get("identifier"):
+            spec_kwargs["identifier"] = sdef["identifier"]
+        min_occ = sdef.get("minOccurs")
+        max_occ = sdef.get("maxOccurs")
+        if min_occ is not None:
+            spec_kwargs["minOccurs"] = int(min_occ)
+        if max_occ is not None:
+            spec_kwargs["maxOccurs"] = max_occ if max_occ == "unbounded" else int(max_occ)
+
+        spec = ifctester_ids.Specification(**spec_kwargs)
         for fdef in sdef.get("applicability", []):
             spec.applicability.append(_build_facet(fdef))
         for fdef in sdef.get("requirements", []):
@@ -456,32 +484,46 @@ async def parse_ids_file(file: UploadFile = File(...)):
                     return {"type": "enumeration", "base": getattr(v, "base", "xs:string"), "values": opts["enumeration"]}
                 if "pattern" in opts:
                     return {"type": "pattern", "base": getattr(v, "base", "xs:string"), "pattern": opts["pattern"]}
-                bounds = {}
-                for k in ("minInclusive", "maxInclusive", "minLength", "maxLength"):
+                parsed = {}
+                bound_keys = ("minInclusive", "maxInclusive", "minExclusive", "maxExclusive")
+                len_keys = ("length", "minLength", "maxLength")
+                for k in bound_keys:
                     if k in opts:
-                        bounds[k] = opts[k]
-                if bounds:
-                    rtype = "bounds" if "minInclusive" in bounds or "maxInclusive" in bounds else "length"
-                    return {"type": rtype, "base": getattr(v, "base", "xs:string"), **bounds}
+                        parsed[k] = opts[k]
+                for k in len_keys:
+                    if k in opts:
+                        parsed[k] = opts[k]
+                if parsed:
+                    is_bounds = any(k in parsed for k in bound_keys)
+                    rtype = "bounds" if is_bounds else "length"
+                    return {"type": rtype, "base": getattr(v, "base", "xs:string"), **parsed}
+            return str(v) if v else ""
+
+        def param_val(v):
+            """Parse a param that could be a simple string or a Restriction."""
+            if v is None:
+                return ""
+            if hasattr(v, "options") and v.options:
+                return val_str(v)
             return str(v) if v else ""
 
         if cls_name == "Entity":
             result["type"] = "entity"
             result["params"] = {
-                "name": getattr(f, "name", "") or "",
-                "predefinedType": getattr(f, "predefinedType", "") or "",
+                "name": param_val(getattr(f, "name", "")),
+                "predefinedType": param_val(getattr(f, "predefinedType", "")),
             }
         elif cls_name == "Attribute":
             result["type"] = "attribute"
             result["params"] = {
-                "name": getattr(f, "name", "") or "",
+                "name": param_val(getattr(f, "name", "")),
                 "value": val_str(getattr(f, "value", None)),
             }
         elif cls_name == "Property":
             result["type"] = "property"
             result["params"] = {
-                "propertySet": getattr(f, "propertySet", "") or "",
-                "baseName": getattr(f, "baseName", "") or "",
+                "propertySet": param_val(getattr(f, "propertySet", "")),
+                "baseName": param_val(getattr(f, "baseName", "")),
                 "dataType": getattr(f, "dataType", "") or "",
                 "value": val_str(getattr(f, "value", None)),
                 "uri": getattr(f, "uri", "") or "",
@@ -489,7 +531,7 @@ async def parse_ids_file(file: UploadFile = File(...)):
         elif cls_name == "Classification":
             result["type"] = "classification"
             result["params"] = {
-                "system": getattr(f, "system", "") or "",
+                "system": param_val(getattr(f, "system", "")),
                 "value": val_str(getattr(f, "value", None)),
                 "uri": getattr(f, "uri", "") or "",
             }
@@ -511,20 +553,33 @@ async def parse_ids_file(file: UploadFile = File(...)):
     doc = {
         "info": {
             "title": getattr(specs, "title", "") or "Imported IDS",
+            "copyright": getattr(specs, "copyright", "") or "",
             "version": getattr(specs, "version", "") or "1.0",
             "author": getattr(specs, "author", "") or "",
             "description": getattr(specs, "description", "") or "",
             "date": getattr(specs, "date", "") or str(date.today()),
+            "purpose": getattr(specs, "purpose", "") or "",
+            "milestone": getattr(specs, "milestone", "") or "",
         },
         "specifications": [],
     }
     for spec in specs.specifications:
+        min_occ = getattr(spec, "minOccurs", 1)
+        max_occ = getattr(spec, "maxOccurs", "unbounded")
+        if min_occ is None:
+            min_occ = 1
+        if max_occ is None:
+            max_occ = "unbounded"
+
         sdef = {
             "id": str(uuid4()),
             "name": getattr(spec, "name", "") or "Untitled",
+            "identifier": getattr(spec, "identifier", "") or "",
             "description": getattr(spec, "description", "") or "",
             "ifcVersion": getattr(spec, "ifcVersion", ["IFC4"]) or ["IFC4"],
             "instructions": getattr(spec, "instructions", "") or "",
+            "minOccurs": min_occ,
+            "maxOccurs": max_occ,
             "applicability": [facet_to_json(f) for f in (spec.applicability or [])],
             "requirements": [facet_to_json(f) for f in (spec.requirements or [])],
         }
@@ -533,15 +588,88 @@ async def parse_ids_file(file: UploadFile = File(...)):
     return doc
 
 
-@app.post("/api/validate-ids-inline")
-async def validate_ids_inline(payload: dict = Body(...)):
-    """Validate IFC model data against IDS specs (client-side model data)."""
+@app.post("/api/validate-ids")
+async def validate_ids(
+    ifc_file: UploadFile = File(...),
+    ids_json: str = Form(...),
+):
+    """Validate an IFC file against IDS specifications.
+
+    Accepts the raw IFC file and the IDS document as JSON string.
+    Returns per-specification pass/fail results with element details.
+    """
     if not HAS_IFCTESTER:
         return Response(
             content="ifctester not installed. Run: pip install ifctester",
             status_code=501,
         )
-    return {
-        "error": "Inline validation requires IFC file. Use /api/validate-ids with file upload.",
-        "hint": "This endpoint is a placeholder for future server-side validation.",
-    }
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp_ifc:
+        content = await ifc_file.read()
+        tmp_ifc.write(content)
+        ifc_path = tmp_ifc.name
+
+    try:
+        payload = json.loads(ids_json)
+        ids_obj = _json_to_ids(payload)
+
+        ifc = ifcopenshell.open(ifc_path)
+        ids_obj.validate(ifc)
+
+        results = []
+        for spec in ids_obj.specifications:
+            applicable = getattr(spec, "applicable_entities", []) or []
+            total = len(applicable)
+            passed = sum(
+                1 for e in applicable
+                if getattr(e, "is_satisfied", lambda: True)()
+            ) if applicable else 0
+            failed = total - passed
+
+            failed_elements = []
+            for entity in applicable:
+                if not getattr(entity, "is_satisfied", lambda: True)():
+                    reasons = []
+                    for req in (spec.requirements or []):
+                        status = getattr(req, "status", None)
+                        if status is False:
+                            msg = getattr(req, "message", "") or ""
+                            reasons.append(msg)
+                    failed_elements.append({
+                        "expressId": entity.id() if hasattr(entity, "id") else None,
+                        "globalId": entity.GlobalId if hasattr(entity, "GlobalId") else "",
+                        "name": entity.Name if hasattr(entity, "Name") else "",
+                        "type": entity.is_a() if hasattr(entity, "is_a") else "",
+                        "reasons": reasons,
+                    })
+
+            spec_status = getattr(spec, "status", None)
+
+            results.append({
+                "name": getattr(spec, "name", ""),
+                "description": getattr(spec, "description", "") or "",
+                "status": spec_status,
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "failedElements": failed_elements[:200],
+            })
+
+        overall = all(r["status"] for r in results) if results else True
+        return {
+            "overall": overall,
+            "fileName": ifc_file.filename,
+            "totalSpecs": len(results),
+            "passedSpecs": sum(1 for r in results if r["status"]),
+            "failedSpecs": sum(1 for r in results if not r["status"]),
+            "specifications": results,
+        }
+    except Exception as e:
+        import traceback
+        return Response(
+            content=json.dumps({"error": str(e), "trace": traceback.format_exc()}),
+            status_code=400,
+            media_type="application/json",
+        )
+    finally:
+        os.unlink(ifc_path)

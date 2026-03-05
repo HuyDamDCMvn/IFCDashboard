@@ -14,10 +14,13 @@ import * as THREE from "three";
  */
 export async function clearAllHighlights(hl) {
   try { await hl.clear("select"); } catch {}
+  const filterStyles = [];
   for (const [name] of hl.styles) {
-    if (name.startsWith("filter_")) {
-      try { await hl.clear(name); } catch {}
-    }
+    if (name.startsWith("filter_")) filterStyles.push(name);
+  }
+  for (const name of filterStyles) {
+    try { await hl.clear(name); } catch {}
+    try { hl.styles.delete(name); } catch {}
   }
 }
 

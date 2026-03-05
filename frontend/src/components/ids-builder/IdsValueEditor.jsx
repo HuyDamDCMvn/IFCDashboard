@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
-import { RESTRICTION_TYPES } from "../../lib/ids-constants";
+import { RESTRICTION_TYPES, XS_BASE_TYPES } from "../../lib/ids-constants";
 
-export default function IdsValueEditor({ value, onChange, suggestions }) {
+export default function IdsValueEditor({ value, onChange, suggestions, placeholder }) {
   const isRestriction = value && typeof value === "object" && value.type;
   const [mode, setMode] = useState(isRestriction ? "restriction" : (value ? "exact" : "any"));
 
@@ -44,7 +44,7 @@ export default function IdsValueEditor({ value, onChange, suggestions }) {
             value={typeof value === "string" ? value : ""}
             onChange={e => onChange(e.target.value)}
             style={inputStyle}
-            placeholder="Exact value..."
+            placeholder={placeholder || "Exact value..."}
             list={suggestions?.length ? "val-suggestions" : undefined}
           />
           {suggestions?.length > 0 && (
@@ -69,7 +69,7 @@ function RestrictionEditor({ restriction, onChange }) {
 
   return (
     <div style={{ padding: 8, background: "#f8f9fb", borderRadius: 6, border: "1px solid #e5e7eb" }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
         <label style={{ fontSize: 10, color: "#555", fontWeight: 600 }}>Type:</label>
         <select
           value={restriction.type}
@@ -78,13 +78,24 @@ function RestrictionEditor({ restriction, onChange }) {
             const base = { type: t, base: restriction.base || "xs:string" };
             if (t === "enumeration") onChange({ ...base, values: restriction.values || [""] });
             else if (t === "pattern") onChange({ ...base, pattern: restriction.pattern || "" });
-            else if (t === "bounds") onChange({ ...base, minInclusive: "", maxInclusive: "" });
-            else if (t === "length") onChange({ ...base, minLength: "", maxLength: "" });
+            else if (t === "bounds") onChange({ ...base, minInclusive: "", maxInclusive: "", minExclusive: "", maxExclusive: "" });
+            else if (t === "length") onChange({ ...base, length: "", minLength: "", maxLength: "" });
           }}
           style={selectStyle}
         >
           {RESTRICTION_TYPES.map(rt => (
             <option key={rt.key} value={rt.key}>{rt.label}</option>
+          ))}
+        </select>
+
+        <label style={{ fontSize: 10, color: "#555", fontWeight: 600, marginLeft: 8 }}>Base:</label>
+        <select
+          value={restriction.base || "xs:string"}
+          onChange={e => updateField("base", e.target.value)}
+          style={selectStyle}
+        >
+          {XS_BASE_TYPES.map(bt => (
+            <option key={bt} value={bt}>{bt}</option>
           ))}
         </select>
       </div>
@@ -109,51 +120,87 @@ function RestrictionEditor({ restriction, onChange }) {
       )}
 
       {restriction.type === "bounds" && (
-        <div style={{ display: "flex", gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={miniLabel}>Min:</label>
-            <input
-              value={restriction.minInclusive ?? ""}
-              onChange={e => updateField("minInclusive", e.target.value)}
-              style={inputStyle}
-              type="number"
-              placeholder="Min"
-            />
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Min Inclusive (>=):</label>
+              <input
+                value={restriction.minInclusive ?? ""}
+                onChange={e => updateField("minInclusive", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Min >="
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Max Inclusive ({"<="}):</label>
+              <input
+                value={restriction.maxInclusive ?? ""}
+                onChange={e => updateField("maxInclusive", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Max <="
+              />
+            </div>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={miniLabel}>Max:</label>
-            <input
-              value={restriction.maxInclusive ?? ""}
-              onChange={e => updateField("maxInclusive", e.target.value)}
-              style={inputStyle}
-              type="number"
-              placeholder="Max"
-            />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Min Exclusive ({">"}): </label>
+              <input
+                value={restriction.minExclusive ?? ""}
+                onChange={e => updateField("minExclusive", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Min >"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Max Exclusive ({"<"}):</label>
+              <input
+                value={restriction.maxExclusive ?? ""}
+                onChange={e => updateField("maxExclusive", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Max <"
+              />
+            </div>
           </div>
         </div>
       )}
 
       {restriction.type === "length" && (
-        <div style={{ display: "flex", gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={miniLabel}>Min Length:</label>
+        <div>
+          <div style={{ marginBottom: 6 }}>
+            <label style={miniLabel}>Exact Length:</label>
             <input
-              value={restriction.minLength ?? ""}
-              onChange={e => updateField("minLength", e.target.value)}
+              value={restriction.length ?? ""}
+              onChange={e => updateField("length", e.target.value)}
               style={inputStyle}
               type="number"
-              placeholder="Min"
+              placeholder="Exact number of characters"
             />
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={miniLabel}>Max Length:</label>
-            <input
-              value={restriction.maxLength ?? ""}
-              onChange={e => updateField("maxLength", e.target.value)}
-              style={inputStyle}
-              type="number"
-              placeholder="Max"
-            />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Min Length:</label>
+              <input
+                value={restriction.minLength ?? ""}
+                onChange={e => updateField("minLength", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Min"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={miniLabel}>Max Length:</label>
+              <input
+                value={restriction.maxLength ?? ""}
+                onChange={e => updateField("maxLength", e.target.value)}
+                style={inputStyle}
+                type="number"
+                placeholder="Max"
+              />
+            </div>
           </div>
         </div>
       )}

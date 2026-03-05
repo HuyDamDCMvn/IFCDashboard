@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useRef } from "react";
 
 const SelectionContext = createContext(null);
 
@@ -13,6 +13,16 @@ export function SelectionProvider({ children }) {
   const [selectedExpressID, setSelectedExpressID] = useState(null);
   const [selectedModelId, setSelectedModelId] = useState(null);
   const [isolationMode, setIsolationMode] = useState("xray");
+  const [classColorMap, setClassColorMapState] = useState({});
+  const colorMapRef = useRef({});
+
+  const setClassColorMap = useCallback((map) => {
+    const json = JSON.stringify(map);
+    if (json !== JSON.stringify(colorMapRef.current)) {
+      colorMapRef.current = map;
+      setClassColorMapState(map);
+    }
+  }, []);
 
   const applyFilter = useCallback((expressIDs, label, key, globalIds, color, colorMap, modelIds) => {
     setFilterExpressIDs(expressIDs);
@@ -64,11 +74,13 @@ export function SelectionProvider({ children }) {
         selectedExpressID,
         selectedModelId,
         isolationMode,
+        classColorMap,
         applyFilter,
         clearFilter,
         toggleFilter,
         setSelectedExpressID: setSelected,
         setIsolationMode,
+        setClassColorMap,
       }}
     >
       {children}

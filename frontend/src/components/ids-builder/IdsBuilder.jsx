@@ -5,21 +5,22 @@ import IdsSpecList from "./IdsSpecList";
 import IdsSpecEditor from "./IdsSpecEditor";
 import IdsXmlPreview from "./IdsXmlPreview";
 import IdsTemplates from "./IdsTemplates";
+import IdsValidationReport from "./IdsValidationReport";
 
-export default function IdsBuilder({ onClose, modelData }) {
+export default function IdsBuilder({ onClose, modelData, modelsList }) {
   return (
     <IdsBuilderProvider>
-      <IdsBuilderInner onClose={onClose} modelData={modelData} />
+      <IdsBuilderInner onClose={onClose} modelData={modelData} modelsList={modelsList} />
     </IdsBuilderProvider>
   );
 }
 
-function IdsBuilderInner({ onClose, modelData }) {
+function IdsBuilderInner({ onClose, modelData, modelsList }) {
   const {
     idsDoc, selectedSpec, previewXml, setPreviewXml,
     resetDocument, loadDocument,
     validationStatus, setValidationStatus,
-    setValidationResults,
+    validationResults, setValidationResults,
   } = useIdsBuilder();
 
   const [showTemplates, setShowTemplates] = useState(false);
@@ -66,26 +67,43 @@ function IdsBuilderInner({ onClose, modelData }) {
   }, [idsDoc, setPreviewXml]);
 
   const handleValidate = useCallback(async () => {
-    if (!modelData?.elements?.length) {
-      alert("No IFC models loaded. Load models first, then validate.");
+    const ifcModels = (modelsList || []).filter(m => m.file);
+    if (ifcModels.length === 0) {
+      alert("No IFC models loaded. Load IFC files first, then validate.");
       return;
     }
     setValidationStatus("running");
+    setValidationResults(null);
     try {
-      const res = await fetch("/api/validate-ids-inline", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idsDocument: idsDoc, modelData }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const results = await res.json();
-      setValidationResults(results);
+      const allResults = [];
+      for (const model of ifcModels) {
+        const fd = new FormData();
+        fd.append("ifc_file", model.file);
+        fd.append("ids_json", JSON.stringify(idsDoc));
+        const res = await fetch("/api/validate-ids", { method: "POST", body: fd });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Validation failed for ${model.fileName}: ${errText}`);
+        }
+        const result = await res.json();
+        allResults.push(result);
+      }
+
+      const merged = {
+        models: allResults,
+        overall: allResults.every(r => r.overall),
+        totalSpecs: allResults.reduce((s, r) => s + r.totalSpecs, 0),
+        passedSpecs: allResults.reduce((s, r) => s + r.passedSpecs, 0),
+        failedSpecs: allResults.reduce((s, r) => s + r.failedSpecs, 0),
+      };
+      setValidationResults(merged);
       setValidationStatus("done");
     } catch (err) {
       console.error("Validation error:", err);
+      alert(`Validation error: ${err.message}`);
       setValidationStatus("error");
     }
-  }, [idsDoc, modelData, setValidationResults, setValidationStatus]);
+  }, [idsDoc, modelsList, setValidationResults, setValidationStatus]);
 
   const handleImport = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -164,9 +182,14 @@ function IdsBuilderInner({ onClose, modelData }) {
             </div>
           </div>
 
-          {/* Right: Spec editor */}
+          {/* Right: Spec editor or Validation report */}
           <div style={rightPanelStyle}>
-            {selectedSpec ? (
+            {validationResults ? (
+              <IdsValidationReport
+                results={validationResults}
+                onClose={() => setValidationResults(null)}
+              />
+            ) : selectedSpec ? (
               <IdsSpecEditor modelData={modelData} />
             ) : (
               <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>

@@ -16,7 +16,7 @@ export default function IfcViewer() {
   const [ready, setReady] = useState(false);
   const [viewVersion, setViewVersion] = useState(0);
 
-  const { filterGlobalIds, isolationMode, setSelectedExpressID, filterColor, filterColorMap } =
+  const { filterGlobalIds, isolationMode, setSelectedExpressID, filterColor, filterColorMap, classColorMap } =
     useSelection();
 
   const { allModelsList, setModelLoaded } = useModelRegistry();
@@ -32,6 +32,22 @@ export default function IfcViewer() {
     }
     return m;
   }, [allModelsList]);
+
+  const defaultColorInfo = useMemo(() => {
+    if (!classColorMap || Object.keys(classColorMap).length === 0) return null;
+    const globalIds = [];
+    const colorMap = {};
+    for (const entry of allModelsList) {
+      if (!entry.dashboardData?.elements) continue;
+      for (const el of entry.dashboardData.elements) {
+        if (el.id) {
+          globalIds.push(el.id);
+          colorMap[el.id] = classColorMap[el.type] || "#999";
+        }
+      }
+    }
+    return globalIds.length > 0 ? { globalIds, colorMap } : null;
+  }, [allModelsList, classColorMap]);
 
   // ─── Initialize That Open engine (once) ───
   useEffect(() => {
@@ -256,7 +272,8 @@ export default function IfcViewer() {
     ready,
     modelsRef.current,
     { filterGlobalIds, isolationMode, filterColor, filterColorMap },
-    viewVersion
+    viewVersion,
+    defaultColorInfo,
   );
 
   // ─── Click → expressID resolver (multi-model) ───

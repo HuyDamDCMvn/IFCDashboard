@@ -3,24 +3,32 @@
  * and IDS facet metadata for the IDS Builder UI.
  */
 
-export const IFC_VERSIONS = ["IFC2X3", "IFC4", "IFC4X3"];
+export const IFC_VERSIONS = ["IFC2X3", "IFC4", "IFC4X3_ADD2"];
 
 export const IFC_ENTITIES = [
+  // Abstract parent types (commonly used in IDS applicability)
+  "IFCPRODUCT", "IFCELEMENT",
+  "IFCBUILDINGELEMENT", "IFCDISTRIBUTIONELEMENT",
+  // Architectural
   "IFCWALL", "IFCWALLSTANDARDCASE", "IFCSLAB", "IFCCOLUMN", "IFCBEAM",
   "IFCDOOR", "IFCWINDOW", "IFCROOF", "IFCSTAIR", "IFCSTAIRFLIGHT",
   "IFCRAMP", "IFCRAMPFLIGHT", "IFCRAILING", "IFCCURTAINWALL",
   "IFCPLATE", "IFCMEMBER", "IFCFOOTING", "IFCPILE",
   "IFCBUILDINGELEMENTPROXY", "IFCOPENINGELEMENT",
-  "IFCFURNISHINGELEMENT", "IFCFLOWSEGMENT", "IFCFLOWTERMINAL",
+  "IFCFURNISHINGELEMENT", "IFCCOVERING", "IFCCHIMNEY",
+  // MEP — Distribution
+  "IFCDISTRIBUTIONFLOWELEMENT", "IFCDISTRIBUTIONCONTROLELEMENT",
+  "IFCDISTRIBUTIONCHAMBER",
+  "IFCFLOWSEGMENT", "IFCFLOWTERMINAL",
   "IFCFLOWFITTING", "IFCFLOWCONTROLLER", "IFCFLOWMOVINGDEVICE",
   "IFCFLOWSTORAGEDEVICE", "IFCFLOWTREATMENTDEVICE",
-  "IFCENERGYCONVERSIONDEVICE", "IFCDISTRIBUTIONFLOWELEMENT",
-  "IFCDISTRIBUTIONCONTROLELEMENT", "IFCDISTRIBUTIONCHAMBER",
+  "IFCENERGYCONVERSIONDEVICE",
   "IFCUNITARYEQUIPMENT", "IFCFIRESUPPRESSIONTERMINAL",
   "IFCSANITARYTERMINAL", "IFCWASTETERMINAL", "IFCSTACKTERMINAL",
   "IFCAIRTERMINALMOVINGDEVICE", "IFCAIRTERMINAL",
+  // Spatial
   "IFCSPACE", "IFCSITE", "IFCBUILDING", "IFCBUILDINGSTOREY",
-  "IFCCOVERING", "IFCCHIMNEY",
+  // IFC4x3 Infrastructure
   "IFCALIGNMENT", "IFCROAD", "IFCBRIDGE", "IFCRAILWAY",
   "IFCFACILITY", "IFCFACILITYPART",
 ];
@@ -78,13 +86,35 @@ export const CARDINALITIES = [
 export const RESTRICTION_TYPES = [
   { key: "enumeration", label: "Enumeration", desc: "One of specific values" },
   { key: "pattern", label: "Pattern", desc: "Regex pattern match" },
-  { key: "bounds", label: "Range", desc: "Min/max bounds" },
-  { key: "length", label: "Length", desc: "String length constraint" },
+  { key: "bounds", label: "Range", desc: "Min/max bounds (inclusive or exclusive)" },
+  { key: "length", label: "Length", desc: "String length constraint (exact, min, max)" },
+];
+
+export const IDS_PURPOSES = [
+  "quantity take-off", "cost estimation", "clash detection",
+  "coordination", "code compliance", "accessibility analysis",
+  "energy analysis", "facility management", "asset management",
+  "construction planning", "sustainability assessment",
+];
+
+export const IDS_MILESTONES = [
+  "Concept Design", "Schematic Design", "Detailed Design",
+  "Construction Documentation", "Construction", "Commissioning",
+  "As-built", "Operation", "Renovation",
+  "RIBA Stage 1", "RIBA Stage 2", "RIBA Stage 3",
+  "RIBA Stage 4", "RIBA Stage 5", "RIBA Stage 6", "RIBA Stage 7",
+  "LOD 100", "LOD 200", "LOD 300", "LOD 350", "LOD 400", "LOD 500",
+];
+
+export const XS_BASE_TYPES = [
+  "xs:string", "xs:integer", "xs:decimal", "xs:double",
+  "xs:float", "xs:boolean", "xs:date", "xs:dateTime", "xs:duration",
 ];
 
 export const PARTOF_RELATIONS = [
   "IFCRELAGGREGATES",
   "IFCRELCONTAINEDINSPATIALSTRUCTURE",
+  "IFCRELASSIGNSTOGROUP",
   "IFCRELVOIDSELEMENT",
   "IFCRELFILLSELEMENT",
   "IFCRELNESTS",
@@ -124,9 +154,12 @@ export function createEmptySpec() {
   return {
     id: newUUID(),
     name: "New Specification",
+    identifier: "",
     description: "",
     ifcVersion: ["IFC4"],
     instructions: "",
+    minOccurs: 1,
+    maxOccurs: "unbounded",
     applicability: [createEmptyFacet("entity")],
     requirements: [],
   };
@@ -136,10 +169,13 @@ export function createEmptyIds() {
   return {
     info: {
       title: "Untitled IDS",
+      copyright: "",
       version: "1.0",
       author: "",
       description: "",
       date: new Date().toISOString().slice(0, 10),
+      purpose: "",
+      milestone: "",
     },
     specifications: [createEmptySpec()],
   };

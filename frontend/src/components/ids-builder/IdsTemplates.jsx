@@ -1,21 +1,50 @@
 import { useCallback } from "react";
 import { useIdsBuilder } from "../../contexts/IdsBuilderContext";
-import { newUUID } from "../../lib/ids-constants";
+import { newUUID, createEmptySpec } from "../../lib/ids-constants";
 
 const TEMPLATES = [
+  {
+    name: "DIN 276 — MEP Cost Code",
+    description: "MEP elements must have Kostengruppe DIN 276 (dritte Ebene) value",
+    build: () => ({
+      info: {
+        title: "DIN 276 Cost Code — MEP",
+        copyright: "",
+        version: "1.0", author: "", description: "All MEP (distribution) elements must have a DIN 276 level-3 cost group code in MRE_allge property set.",
+        date: new Date().toISOString().slice(0, 10),
+        purpose: "cost estimation",
+        milestone: "",
+      },
+      specifications: [{
+        id: newUUID(), name: "MEP — DIN 276 code required",
+        identifier: "DIN276-MEP-01",
+        description: "Every IfcDistributionElement must have a non-empty Kostengruppe DIN 276 (dritte Ebene) property",
+        ifcVersion: ["IFC4"], instructions: "Provide the DIN 276 level-3 cost group code, e.g. 411.10",
+        minOccurs: 1, maxOccurs: "unbounded",
+        applicability: [
+          { id: newUUID(), type: "entity", cardinality: "required", instructions: "", params: { name: "IFCDISTRIBUTIONELEMENT", predefinedType: "" } },
+        ], requirements: [
+          { id: newUUID(), type: "property", cardinality: "required", instructions: "Enter DIN 276 cost code (e.g. 411.10)", params: { propertySet: "MRE_allge", baseName: "Kostengruppe DIN 276 (dritte Ebene)", dataType: "IFCLABEL", value: "", uri: "" } },
+        ],
+      }],
+    }),
+  },
   {
     name: "Basic QA — Names Required",
     description: "All building elements must have a Name attribute",
     build: () => ({
       info: {
         title: "Basic QA — Names Required",
-        version: "1.0", author: "", description: "Ensures all building elements have a Name.",
-        date: new Date().toISOString().slice(0, 10),
+        copyright: "", version: "1.0", author: "", description: "Ensures all building elements have a Name.",
+        date: new Date().toISOString().slice(0, 10), purpose: "coordination", milestone: "",
       },
       specifications: [{
         id: newUUID(), name: "All elements must have a Name",
+        identifier: "QA-NAME-01",
         description: "Every IfcBuildingElement should have a non-empty Name attribute",
-        ifcVersion: ["IFC4"], instructions: "", applicability: [
+        ifcVersion: ["IFC4"], instructions: "",
+        minOccurs: 1, maxOccurs: "unbounded",
+        applicability: [
           { id: newUUID(), type: "entity", cardinality: "required", instructions: "", params: { name: "IFCBUILDINGELEMENT", predefinedType: "" } },
         ], requirements: [
           { id: newUUID(), type: "attribute", cardinality: "required", instructions: "Provide a descriptive Name", params: { name: "Name", value: "" } },

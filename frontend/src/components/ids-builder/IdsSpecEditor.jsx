@@ -3,6 +3,12 @@ import { useIdsBuilder } from "../../contexts/IdsBuilderContext";
 import { IFC_VERSIONS, FACET_TYPES } from "../../lib/ids-constants";
 import IdsFacetEditor from "./IdsFacetEditor";
 
+const SPEC_CARDINALITIES = [
+  { minOccurs: 1, maxOccurs: "unbounded", label: "Required", desc: "At least one matching element must exist", color: "#10b981" },
+  { minOccurs: 0, maxOccurs: "unbounded", label: "Optional", desc: "Matching elements are optional, but if present must pass", color: "#f59e0b" },
+  { minOccurs: 0, maxOccurs: 0, label: "Prohibited", desc: "No matching elements may exist", color: "#ef4444" },
+];
+
 export default function IdsSpecEditor({ modelData }) {
   const {
     selectedSpec, selectedSpecId,
@@ -33,13 +39,26 @@ export default function IdsSpecEditor({ modelData }) {
     <div style={{ padding: 20, maxWidth: 900, margin: "0 auto" }}>
       {/* Spec Header */}
       <div style={{ marginBottom: 20 }}>
-        <label style={labelStyle}>Specification Name</label>
-        <input
-          value={spec.name}
-          onChange={e => updateSpecification(selectedSpecId, { name: e.target.value })}
-          style={{ ...inputStyle, fontSize: 16, fontWeight: 600, padding: "8px 12px" }}
-          placeholder="e.g. Walls must have FireRating"
-        />
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Specification Name</label>
+            <input
+              value={spec.name}
+              onChange={e => updateSpecification(selectedSpecId, { name: e.target.value })}
+              style={{ ...inputStyle, fontSize: 16, fontWeight: 600, padding: "8px 12px" }}
+              placeholder="e.g. Walls must have FireRating"
+            />
+          </div>
+          <div style={{ width: 140, flexShrink: 0 }}>
+            <label style={labelStyle}>Identifier</label>
+            <input
+              value={spec.identifier || ""}
+              onChange={e => updateSpecification(selectedSpecId, { identifier: e.target.value })}
+              style={{ ...inputStyle, fontSize: 13, padding: "8px 12px" }}
+              placeholder="e.g. SP01"
+            />
+          </div>
+        </div>
 
         <div style={{ display: "flex", gap: 16, marginTop: 12 }}>
           <div style={{ flex: 1 }}>
@@ -54,7 +73,7 @@ export default function IdsSpecEditor({ modelData }) {
           </div>
           <div>
             <label style={labelStyle}>IFC Versions</label>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {IFC_VERSIONS.map(v => (
                 <button
                   key={v}
@@ -74,14 +93,43 @@ export default function IdsSpecEditor({ modelData }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 8 }}>
-          <label style={labelStyle}>Instructions (optional)</label>
-          <input
-            value={spec.instructions || ""}
-            onChange={e => updateSpecification(selectedSpecId, { instructions: e.target.value })}
-            style={inputStyle}
-            placeholder="General instructions for this specification..."
-          />
+        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Instructions (optional)</label>
+            <input
+              value={spec.instructions || ""}
+              onChange={e => updateSpecification(selectedSpecId, { instructions: e.target.value })}
+              style={inputStyle}
+              placeholder="General instructions for this specification..."
+            />
+          </div>
+          <div style={{ width: 220, flexShrink: 0 }}>
+            <label style={labelStyle}>Specification Applicability</label>
+            <div style={{ display: "flex", gap: 4 }}>
+              {SPEC_CARDINALITIES.map(sc => {
+                const isActive = (spec.minOccurs ?? 1) === sc.minOccurs
+                  && (spec.maxOccurs ?? "unbounded") === sc.maxOccurs;
+                return (
+                  <button
+                    key={sc.label}
+                    onClick={() => updateSpecification(selectedSpecId, {
+                      minOccurs: sc.minOccurs, maxOccurs: sc.maxOccurs,
+                    })}
+                    title={sc.desc}
+                    style={{
+                      padding: "4px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600,
+                      border: isActive ? `1.5px solid ${sc.color}` : "1.5px solid #d1d5db",
+                      background: isActive ? `${sc.color}15` : "#fff",
+                      color: isActive ? sc.color : "#888",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {sc.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
