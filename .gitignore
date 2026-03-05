@@ -30,6 +30,7 @@ npm-debug.log*
 # Large IFC files (>10MB)
 TestIFC/HG--_ASS_430_5-_FA-_T1_0000_-_GE.ifc
 TestIFC/O1--_ASS_410_5-_FA-_T1_0000_-_GE_edited_edited.ifc
+TestIFC/O1--_ASS_410_5-_FA-_T1_0000_-_GE.ifc
 
 # Test screenshots/output
 frontend/*-output/

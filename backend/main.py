@@ -894,7 +894,21 @@ async def validate_ids(
         os.unlink(ifc_path)
 
 
-# ─── IFC Diff Endpoints ──────────────────────────────────────────
+# ─── IFC Diff ────────────────────────────────────────────────────
+
+_DIFF_MAX_FILE_SIZE = 300 * 1024 * 1024
+_DIFF_MAX_RESULTS = 2000
+_DIFF_TWO_PASS_THRESHOLD = 50 * 1024 * 1024  # per-file; switch to two-pass above this
+_DIFF_FLOAT_DIGITS = 6  # significant digits for float rounding in hash
+_DIFF_NOISE_TYPES = frozenset([
+    "IfcDistributionPort", "IfcOpeningElement",
+    "IfcFeatureElementSubtraction", "IfcVirtualElement",
+])
+_DIFF_ATTRS = (
+    "Name", "Description", "ObjectType", "PredefinedType", "Tag",
+    "LongName", "Status",
+)
+
 
 def _get_schema_id(ifc):
     try:
@@ -903,8 +917,8 @@ def _get_schema_id(ifc):
         return ifc.schema
 
 
-def _collect_products(ifc):
-    """Collect all diffable products (IfcElement + IfcSpatialElement, excluding features)."""
+def _collect_products(ifc, include_noise=False):
+    """Collect diffable products, optionally excluding noise types."""
     elems = ifc.by_type("IfcElement")
     if ifc.schema == "IFC2X3":
         elems += ifc.by_type("IfcSpatialStructureElement")
@@ -913,22 +927,86 @@ def _collect_products(ifc):
             elems += ifc.by_type("IfcSpatialElement")
         except Exception:
             pass
-    return [e for e in elems if not e.is_a("IfcFeatureElement") and getattr(e, "GlobalId", None)]
+    products = [e for e in elems
+                if not e.is_a("IfcFeatureElement")
+                and getattr(e, "GlobalId", None)]
+    if not include_noise:
+        products = [e for e in products if e.is_a() not in _DIFF_NOISE_TYPES]
+    return products
+
+
+def _norm_val(v):
+    """Round floats for tolerance-aware hashing."""
+    if isinstance(v, float):
+        return round(v, _DIFF_FLOAT_DIGITS)
+    return v
 
 
 def _pset_hash(psets: dict) -> str:
     cleaned = {}
     for pn, props in sorted(psets.items()):
-        cleaned[pn] = {k: v for k, v in sorted(props.items()) if k != "id"}
+        cleaned[pn] = {k: _norm_val(v) for k, v in sorted(props.items()) if k != "id"}
     return hashlib.md5(json.dumps(cleaned, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def _geometry_hash(el):
+    """Hash geometry representation STEP IDs — detects shape changes without tessellation."""
+    rep = getattr(el, "Representation", None)
+    if not rep:
+        return None
+    try:
+        ids = []
+        for r in rep.Representations:
+            for item in r.Items:
+                ids.append(item.id())
+        return hashlib.md5(str(sorted(ids)).encode()).hexdigest() if ids else None
+    except Exception:
+        return None
+
+
+def _relative_placement(el):
+    """Extract relative placement tuple (local offset, not resolved absolute).
+
+    Returns (location_tuple, axis_tuple, refdir_tuple, parent_step_id) or None.
+    Comparing relative placement avoids float amplification from large UTM coordinates.
+    """
+    op = getattr(el, "ObjectPlacement", None)
+    if not op:
+        return None
+    try:
+        rp = op.RelativePlacement
+        if not rp:
+            return None
+        loc = tuple(round(c, _DIFF_FLOAT_DIGITS) for c in rp.Location.Coordinates) if rp.Location else None
+        axis = tuple(round(c, _DIFF_FLOAT_DIGITS) for c in rp.Axis.DirectionRatios) if getattr(rp, "Axis", None) else None
+        ref_dir = tuple(round(c, _DIFF_FLOAT_DIGITS) for c in rp.RefDirection.DirectionRatios) if getattr(rp, "RefDirection", None) else None
+        parent_id = op.PlacementRelTo.id() if getattr(op, "PlacementRelTo", None) else None
+        return (loc, axis, ref_dir, parent_id)
+    except Exception:
+        return None
+
+
+def _placements_equal(fp1, fp2):
+    if fp1 is None and fp2 is None:
+        return True
+    if fp1 is None or fp2 is None:
+        return False
+    return fp1 == fp2
+
+
+def _get_psets_safe(el):
+    try:
+        return ifcopenshell.util.element.get_psets(el)
+    except Exception:
+        return {}
+
+
 def _diff_element_detail(old_el, new_el, old_ifc, new_ifc, precision=1e-4):
-    """Return detailed change dict for a single element, or None if unchanged."""
+    """Return change dict or None. Uses relative placement + tolerance-aware hash."""
     changes = {}
 
-    # Attribute changes
-    for attr in ("Name", "Description", "ObjectType", "PredefinedType", "Tag"):
+    # 1. Attributes (cheap — check first)
+    for attr in _DIFF_ATTRS:
         ov = getattr(old_el, attr, None)
         nv = getattr(new_el, attr, None)
         if ov != nv:
@@ -937,31 +1015,21 @@ def _diff_element_detail(old_el, new_el, old_ifc, new_ifc, precision=1e-4):
                 "new": str(nv) if nv is not None else None,
             }
 
-    # Placement changes
-    try:
-        old_m = ifcopenshell.util.placement.get_local_placement(
-            old_el.ObjectPlacement
-        ) if getattr(old_el, "ObjectPlacement", None) else None
-        new_m = ifcopenshell.util.placement.get_local_placement(
-            new_el.ObjectPlacement
-        ) if getattr(new_el, "ObjectPlacement", None) else None
-        if old_m is not None and new_m is not None:
-            if not np.allclose(old_m, new_m, atol=precision):
-                changes["placement"] = True
-        elif (old_m is None) != (new_m is None):
-            changes["placement"] = True
-    except Exception:
-        pass
+    # 2. Relative placement (avoids UTM float amplification)
+    old_rp = _relative_placement(old_el)
+    new_rp = _relative_placement(new_el)
+    if not _placements_equal(old_rp, new_rp):
+        changes["placement"] = True
 
-    # Property changes (hash-first, detail on mismatch)
-    try:
-        old_psets = ifcopenshell.util.element.get_psets(old_el)
-    except Exception:
-        old_psets = {}
-    try:
-        new_psets = ifcopenshell.util.element.get_psets(new_el)
-    except Exception:
-        new_psets = {}
+    # 3. Geometry representation hash
+    old_gh = _geometry_hash(old_el)
+    new_gh = _geometry_hash(new_el)
+    if old_gh != new_gh:
+        changes["geometry"] = True
+
+    # 4. Property sets (tolerance-aware hash, detail on mismatch)
+    old_psets = _get_psets_safe(old_el)
+    new_psets = _get_psets_safe(new_el)
     if _pset_hash(old_psets) != _pset_hash(new_psets):
         prop_changes = {}
         all_names = set(old_psets) | set(new_psets)
@@ -986,7 +1054,7 @@ def _diff_element_detail(old_el, new_el, old_ifc, new_ifc, precision=1e-4):
         if prop_changes:
             changes["properties"] = prop_changes
 
-    # Type changes
+    # 5. Type assignment
     try:
         old_type = ifcopenshell.util.element.get_type(old_el)
         new_type = ifcopenshell.util.element.get_type(new_el)
@@ -1000,7 +1068,7 @@ def _diff_element_detail(old_el, new_el, old_ifc, new_ifc, precision=1e-4):
             "new": {"globalId": new_tid, "name": new_type.Name if new_type else None},
         }
 
-    # Container changes
+    # 6. Spatial container
     try:
         old_c = ifcopenshell.util.element.get_container(old_el)
         new_c = ifcopenshell.util.element.get_container(new_el)
@@ -1027,8 +1095,242 @@ def _format_element_info(el, ifc):
     }
 
 
-_DIFF_MAX_FILE_SIZE = 300 * 1024 * 1024  # 300 MB per file
-_DIFF_MAX_RESULTS = 2000  # cap elements per category in response
+# ─── Two-pass fingerprint extraction for large files ─────────────
+
+def _extract_fingerprints(ifc_path, include_noise=False):
+    """Load IFC, extract per-element fingerprints, return (meta, fingerprints). Caller must gc."""
+    import gc as _gc
+    ifc = ifcopenshell.open(ifc_path)
+    schema = ifc.schema
+    schema_id = _get_schema_id(ifc)
+    products = _collect_products(ifc, include_noise=include_noise)
+
+    fps = {}
+    for el in products:
+        guid = el.GlobalId
+        attrs = {}
+        for attr in _DIFF_ATTRS:
+            v = getattr(el, attr, None)
+            if v is not None:
+                attrs[attr] = str(v)
+
+        psets = _get_psets_safe(el)
+        cleaned_psets = {}
+        for pn, props in psets.items():
+            cleaned_psets[pn] = {k: v for k, v in props.items() if k != "id"}
+
+        fps[guid] = {
+            "class": el.is_a(),
+            "name": el.Name or "",
+            "expressId": el.id(),
+            "attrs": attrs,
+            "placement": _relative_placement(el),
+            "geo": _geometry_hash(el),
+            "pset_hash": _pset_hash(psets),
+            "psets": cleaned_psets,
+            "type_guid": None,
+            "container": None,
+            "storey": "",
+        }
+        try:
+            etype = ifcopenshell.util.element.get_type(el)
+            if etype:
+                fps[guid]["type_guid"] = etype.GlobalId
+                fps[guid]["type_name"] = etype.Name
+        except Exception:
+            pass
+        try:
+            c = ifcopenshell.util.element.get_container(el)
+            if c:
+                fps[guid]["container"] = c.Name
+        except Exception:
+            pass
+        spatial = get_spatial_info(el)
+        fps[guid]["storey"] = spatial.get("storey", "")
+
+    meta = {
+        "schema": schema,
+        "schema_id": schema_id,
+        "total_products": len(products),
+    }
+    del ifc, products
+    _gc.collect()
+    return meta, fps
+
+
+def _compare_fingerprints(old_fps, new_fps, type_filter, precision=1e-4):
+    """Compare two fingerprint dicts. Returns (added, deleted, changed, unchanged_count)."""
+    old_guids = set(old_fps)
+    new_guids = set(new_fps)
+
+    added_guids = new_guids - old_guids
+    deleted_guids = old_guids - new_guids
+    common_guids = old_guids & new_guids
+
+    added = []
+    for g in added_guids:
+        fp = new_fps[g]
+        if type_filter and fp["class"] not in type_filter:
+            continue
+        added.append({
+            "globalId": g, "expressId": fp["expressId"],
+            "type": fp["class"], "name": fp["name"],
+            "predefinedType": fp["attrs"].get("PredefinedType", ""),
+            "storey": fp["storey"],
+        })
+
+    deleted = []
+    for g in deleted_guids:
+        fp = old_fps[g]
+        if type_filter and fp["class"] not in type_filter:
+            continue
+        deleted.append({
+            "globalId": g, "expressId": fp["expressId"],
+            "type": fp["class"], "name": fp["name"],
+            "predefinedType": fp["attrs"].get("PredefinedType", ""),
+            "storey": fp["storey"],
+        })
+
+    changed = []
+    unchanged_count = 0
+    for g in common_guids:
+        o, n = old_fps[g], new_fps[g]
+        if type_filter and n["class"] not in type_filter:
+            continue
+
+        changes = {}
+
+        # Attributes
+        if o["attrs"] != n["attrs"]:
+            attr_diff = {}
+            for k in set(o["attrs"]) | set(n["attrs"]):
+                ov, nv = o["attrs"].get(k), n["attrs"].get(k)
+                if ov != nv:
+                    attr_diff[k] = {"old": ov, "new": nv}
+            if attr_diff:
+                changes["attributes"] = attr_diff
+
+        # Placement
+        if not _placements_equal(o["placement"], n["placement"]):
+            changes["placement"] = True
+
+        # Geometry
+        if o["geo"] != n["geo"]:
+            changes["geometry"] = True
+
+        # Properties (hash already tolerance-aware)
+        if o["pset_hash"] != n["pset_hash"]:
+            prop_changes = {}
+            all_names = set(o["psets"]) | set(n["psets"])
+            for pn in all_names:
+                op = o["psets"].get(pn, {})
+                np_ = n["psets"].get(pn, {})
+                if pn not in o["psets"]:
+                    prop_changes[pn] = {"_status": "added"}
+                elif pn not in n["psets"]:
+                    prop_changes[pn] = {"_status": "deleted"}
+                else:
+                    diffs = {}
+                    for k in set(op) | set(np_):
+                        ov, nv = op.get(k), np_.get(k)
+                        if ov != nv:
+                            if isinstance(ov, (int, float)) and isinstance(nv, (int, float)):
+                                if abs(ov - nv) <= precision:
+                                    continue
+                            diffs[k] = {"old": ov, "new": nv}
+                    if diffs:
+                        prop_changes[pn] = {"_status": "modified", "properties": diffs}
+            if prop_changes:
+                changes["properties"] = prop_changes
+
+        # Type
+        if o.get("type_guid") != n.get("type_guid"):
+            changes["type"] = {
+                "old": {"globalId": o.get("type_guid"), "name": o.get("type_name")},
+                "new": {"globalId": n.get("type_guid"), "name": n.get("type_name")},
+            }
+
+        # Container
+        if o["container"] != n["container"]:
+            changes["container"] = {"old": o["container"], "new": n["container"]}
+
+        if changes:
+            changed.append({
+                "globalId": g, "expressId": n["expressId"],
+                "type": n["class"], "name": n["name"],
+                "predefinedType": n["attrs"].get("PredefinedType", ""),
+                "storey": n["storey"],
+                "changes": changes,
+            })
+        else:
+            unchanged_count += 1
+
+    added.sort(key=lambda x: (x["type"], x["name"]))
+    deleted.sort(key=lambda x: (x["type"], x["name"]))
+    changed.sort(key=lambda x: (x["type"], x["name"]))
+    return added, deleted, changed, unchanged_count
+
+
+def _build_diff_response(
+    added, deleted, changed, unchanged_count,
+    old_file_name, new_file_name,
+    old_meta, new_meta,
+    schema_warning, elapsed_s, mode,
+    noise_excluded=0,
+):
+    total_added, total_deleted, total_changed = len(added), len(deleted), len(changed)
+
+    change_type_summary = {}
+    for el in changed:
+        for key in el.get("changes", {}):
+            change_type_summary[key] = change_type_summary.get(key, 0) + 1
+
+    type_summary = {"added": {}, "deleted": {}, "changed": {}}
+    for el in added:
+        type_summary["added"][el["type"]] = type_summary["added"].get(el["type"], 0) + 1
+    for el in deleted:
+        type_summary["deleted"][el["type"]] = type_summary["deleted"].get(el["type"], 0) + 1
+    for el in changed:
+        type_summary["changed"][el["type"]] = type_summary["changed"].get(el["type"], 0) + 1
+
+    truncated = (total_added > _DIFF_MAX_RESULTS
+                 or total_deleted > _DIFF_MAX_RESULTS
+                 or total_changed > _DIFF_MAX_RESULTS)
+
+    return {
+        "schemaCheck": {
+            "schema": old_meta["schema"],
+            "oldSchemaId": old_meta["schema_id"],
+            "newSchemaId": new_meta["schema_id"],
+            "match": "exact" if not schema_warning else "compatible",
+            "warning": schema_warning,
+        },
+        "oldFile": {
+            "name": old_file_name,
+            "schema": old_meta["schema_id"],
+            "totalProducts": old_meta["total_products"],
+        },
+        "newFile": {
+            "name": new_file_name,
+            "schema": new_meta["schema_id"],
+            "totalProducts": new_meta["total_products"],
+        },
+        "summary": {
+            "addedCount": total_added,
+            "deletedCount": total_deleted,
+            "changedCount": total_changed,
+            "unchangedCount": unchanged_count,
+        },
+        "truncated": truncated,
+        "maxResults": _DIFF_MAX_RESULTS if truncated else None,
+        "changeTypeSummary": change_type_summary,
+        "typeSummary": type_summary,
+        "timing": {"elapsed_s": round(elapsed_s, 2), "mode": mode},
+        "noiseExcluded": noise_excluded,
+        "added": added[:_DIFF_MAX_RESULTS],
+        "deleted": deleted[:_DIFF_MAX_RESULTS],
+        "changed": changed[:_DIFF_MAX_RESULTS],
+    }
 
 
 @app.post("/api/diff-ifc")
@@ -1037,9 +1339,10 @@ async def diff_ifc(
     new_file: UploadFile = File(...),
     filter_types: str = Form(None),
 ):
-    """Compare two IFC files. Both must share the same general schema."""
+    """Compare two IFC files. Auto-selects one-pass or two-pass based on file size."""
     old_path = new_path = None
     try:
+        t_start = time.time()
         old_bytes = await old_file.read()
         new_bytes = await new_file.read()
         for label, data in [("Old", old_bytes), ("New", new_bytes)]:
@@ -1055,166 +1358,29 @@ async def diff_ifc(
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
             tmp.write(old_bytes)
             old_path = tmp.name
+        old_size = len(old_bytes)
         del old_bytes
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
             tmp.write(new_bytes)
             new_path = tmp.name
+        new_size = len(new_bytes)
         del new_bytes
 
-        try:
-            old_ifc = ifcopenshell.open(old_path)
-        except Exception as e:
-            return Response(
-                content=json.dumps({"error": f"Cannot parse old file: {e}"}),
-                status_code=400, media_type="application/json",
-            )
-        try:
-            new_ifc = ifcopenshell.open(new_path)
-        except Exception as e:
-            return Response(
-                content=json.dumps({"error": f"Cannot parse new file: {e}"}),
-                status_code=400, media_type="application/json",
-            )
-
-        # Schema compatibility gate
-        old_schema = old_ifc.schema
-        new_schema = new_ifc.schema
-        old_schema_id = _get_schema_id(old_ifc)
-        new_schema_id = _get_schema_id(new_ifc)
-
-        if old_schema != new_schema:
-            return Response(
-                content=json.dumps({
-                    "error": "schema_mismatch",
-                    "message": f"Schema mismatch: {old_schema} vs {new_schema}. Both files must use the same IFC schema.",
-                    "oldFile": {"name": old_file.filename, "schema": old_schema, "schemaId": old_schema_id},
-                    "newFile": {"name": new_file.filename, "schema": new_schema, "schemaId": new_schema_id},
-                }),
-                status_code=422, media_type="application/json",
-            )
-
-        schema_warning = None
-        if old_schema_id != new_schema_id:
-            schema_warning = f"Minor version difference: {old_schema_id} vs {new_schema_id}"
-
-        # Collect products
-        old_products = _collect_products(old_ifc)
-        new_products = _collect_products(new_ifc)
-
-        if not old_products and not new_products:
-            return Response(
-                content=json.dumps({"error": "Both files contain no diffable elements."}),
-                status_code=400, media_type="application/json",
-            )
-
-        old_guids = {e.GlobalId for e in old_products}
-        new_guids = {e.GlobalId for e in new_products}
-
-        deleted_guids = old_guids - new_guids
-        added_guids = new_guids - old_guids
-        common_guids = old_guids & new_guids
-
-        # Optional type filter
         type_filter = set()
         if filter_types and filter_types.strip():
             type_filter = {t.strip() for t in filter_types.split(",") if t.strip()}
 
-        # Format added / deleted
-        added = []
-        for guid in added_guids:
-            el = new_ifc.by_guid(guid)
-            info = _format_element_info(el, new_ifc)
-            if type_filter and info["type"] not in type_filter:
-                continue
-            added.append(info)
+        use_two_pass = (old_size > _DIFF_TWO_PASS_THRESHOLD
+                        or new_size > _DIFF_TWO_PASS_THRESHOLD)
 
-        deleted = []
-        for guid in deleted_guids:
-            el = old_ifc.by_guid(guid)
-            info = _format_element_info(el, old_ifc)
-            if type_filter and info["type"] not in type_filter:
-                continue
-            deleted.append(info)
-
-        # Diff common elements (hash+placement strategy)
-        changed = []
-        unchanged_count = 0
-        for guid in common_guids:
-            old_el = old_ifc.by_guid(guid)
-            new_el = new_ifc.by_guid(guid)
-
-            if type_filter:
-                etype = get_export_as(new_el, new_schema)
-                if etype not in type_filter:
-                    continue
-
-            detail = _diff_element_detail(old_el, new_el, old_ifc, new_ifc)
-            if detail:
-                info = _format_element_info(new_el, new_ifc)
-                info["changes"] = detail
-                changed.append(info)
-            else:
-                unchanged_count += 1
-
-        added.sort(key=lambda x: (x["type"], x["name"]))
-        deleted.sort(key=lambda x: (x["type"], x["name"]))
-        changed.sort(key=lambda x: (x["type"], x["name"]))
-
-        total_added = len(added)
-        total_deleted = len(deleted)
-        total_changed = len(changed)
-
-        # Change type summary for charts (computed before truncation)
-        change_type_summary = {}
-        for el in changed:
-            for key in el.get("changes", {}):
-                change_type_summary[key] = change_type_summary.get(key, 0) + 1
-
-        # Element type summary for charts
-        type_summary = {"added": {}, "deleted": {}, "changed": {}}
-        for el in added:
-            type_summary["added"][el["type"]] = type_summary["added"].get(el["type"], 0) + 1
-        for el in deleted:
-            type_summary["deleted"][el["type"]] = type_summary["deleted"].get(el["type"], 0) + 1
-        for el in changed:
-            type_summary["changed"][el["type"]] = type_summary["changed"].get(el["type"], 0) + 1
-
-        truncated = (total_added > _DIFF_MAX_RESULTS
-                     or total_deleted > _DIFF_MAX_RESULTS
-                     or total_changed > _DIFF_MAX_RESULTS)
-
-        return {
-            "schemaCheck": {
-                "schema": old_schema,
-                "oldSchemaId": old_schema_id,
-                "newSchemaId": new_schema_id,
-                "match": "exact" if not schema_warning else "compatible",
-                "warning": schema_warning,
-            },
-            "oldFile": {
-                "name": old_file.filename,
-                "schema": old_schema_id,
-                "totalProducts": len(old_products),
-            },
-            "newFile": {
-                "name": new_file.filename,
-                "schema": new_schema_id,
-                "totalProducts": len(new_products),
-            },
-            "summary": {
-                "addedCount": total_added,
-                "deletedCount": total_deleted,
-                "changedCount": total_changed,
-                "unchangedCount": unchanged_count,
-            },
-            "truncated": truncated,
-            "maxResults": _DIFF_MAX_RESULTS if truncated else None,
-            "changeTypeSummary": change_type_summary,
-            "typeSummary": type_summary,
-            "added": added[:_DIFF_MAX_RESULTS],
-            "deleted": deleted[:_DIFF_MAX_RESULTS],
-            "changed": changed[:_DIFF_MAX_RESULTS],
-        }
+        if use_two_pass:
+            return _diff_two_pass(old_path, new_path,
+                                  old_file.filename, new_file.filename,
+                                  type_filter, t_start)
+        else:
+            return _diff_one_pass(old_path, new_path,
+                                  old_file.filename, new_file.filename,
+                                  type_filter, t_start)
 
     except Exception as e:
         import traceback
@@ -1229,3 +1395,138 @@ async def diff_ifc(
                     os.unlink(p)
                 except OSError:
                     pass
+
+
+def _diff_one_pass(old_path, new_path, old_name, new_name, type_filter, t_start):
+    """Standard one-pass: both models in memory simultaneously."""
+    try:
+        old_ifc = ifcopenshell.open(old_path)
+    except Exception as e:
+        return Response(content=json.dumps({"error": f"Cannot parse old file: {e}"}),
+                        status_code=400, media_type="application/json")
+    try:
+        new_ifc = ifcopenshell.open(new_path)
+    except Exception as e:
+        return Response(content=json.dumps({"error": f"Cannot parse new file: {e}"}),
+                        status_code=400, media_type="application/json")
+
+    old_schema, new_schema = old_ifc.schema, new_ifc.schema
+    old_schema_id, new_schema_id = _get_schema_id(old_ifc), _get_schema_id(new_ifc)
+
+    if old_schema != new_schema:
+        return Response(content=json.dumps({
+            "error": "schema_mismatch",
+            "message": f"Schema mismatch: {old_schema} vs {new_schema}. Both files must use the same IFC schema.",
+            "oldFile": {"name": old_name, "schema": old_schema, "schemaId": old_schema_id},
+            "newFile": {"name": new_name, "schema": new_schema, "schemaId": new_schema_id},
+        }), status_code=422, media_type="application/json")
+
+    schema_warning = None
+    if old_schema_id != new_schema_id:
+        schema_warning = f"Minor version difference: {old_schema_id} vs {new_schema_id}"
+
+    old_products = _collect_products(old_ifc)
+    new_products = _collect_products(new_ifc)
+
+    # Count noise elements excluded
+    all_old = [e for e in old_ifc.by_type("IfcElement") if getattr(e, "GlobalId", None)]
+    noise_excluded = len(all_old) - len([e for e in all_old if e.is_a() not in _DIFF_NOISE_TYPES])
+
+    if not old_products and not new_products:
+        return Response(content=json.dumps({"error": "Both files contain no diffable elements."}),
+                        status_code=400, media_type="application/json")
+
+    old_guids = {e.GlobalId for e in old_products}
+    new_guids = {e.GlobalId for e in new_products}
+    deleted_guids = old_guids - new_guids
+    added_guids = new_guids - old_guids
+    common_guids = old_guids & new_guids
+
+    added = []
+    for guid in added_guids:
+        el = new_ifc.by_guid(guid)
+        info = _format_element_info(el, new_ifc)
+        if type_filter and info["type"] not in type_filter:
+            continue
+        added.append(info)
+
+    deleted = []
+    for guid in deleted_guids:
+        el = old_ifc.by_guid(guid)
+        info = _format_element_info(el, old_ifc)
+        if type_filter and info["type"] not in type_filter:
+            continue
+        deleted.append(info)
+
+    changed = []
+    unchanged_count = 0
+    for guid in common_guids:
+        old_el = old_ifc.by_guid(guid)
+        new_el = new_ifc.by_guid(guid)
+        if type_filter:
+            etype = get_export_as(new_el, new_ifc.schema)
+            if etype not in type_filter:
+                continue
+        detail = _diff_element_detail(old_el, new_el, old_ifc, new_ifc)
+        if detail:
+            info = _format_element_info(new_el, new_ifc)
+            info["changes"] = detail
+            changed.append(info)
+        else:
+            unchanged_count += 1
+
+    old_meta = {"schema": old_schema, "schema_id": old_schema_id, "total_products": len(old_products)}
+    new_meta = {"schema": new_schema, "schema_id": new_schema_id, "total_products": len(new_products)}
+    return _build_diff_response(
+        added, deleted, changed, unchanged_count,
+        old_name, new_name, old_meta, new_meta,
+        schema_warning, time.time() - t_start, "one-pass",
+        noise_excluded=noise_excluded,
+    )
+
+
+def _diff_two_pass(old_path, new_path, old_name, new_name, type_filter, t_start):
+    """Memory-efficient two-pass: load one file at a time."""
+    import gc as _gc
+
+    # Pass 1 — old file
+    try:
+        old_meta, old_fps = _extract_fingerprints(old_path)
+    except Exception as e:
+        return Response(content=json.dumps({"error": f"Cannot parse old file: {e}"}),
+                        status_code=400, media_type="application/json")
+    _gc.collect()
+
+    # Pass 2 — new file
+    try:
+        new_meta, new_fps = _extract_fingerprints(new_path)
+    except Exception as e:
+        return Response(content=json.dumps({"error": f"Cannot parse new file: {e}"}),
+                        status_code=400, media_type="application/json")
+    _gc.collect()
+
+    # Schema check
+    if old_meta["schema"] != new_meta["schema"]:
+        return Response(content=json.dumps({
+            "error": "schema_mismatch",
+            "message": f"Schema mismatch: {old_meta['schema']} vs {new_meta['schema']}.",
+            "oldFile": {"name": old_name, "schema": old_meta["schema"], "schemaId": old_meta["schema_id"]},
+            "newFile": {"name": new_name, "schema": new_meta["schema"], "schemaId": new_meta["schema_id"]},
+        }), status_code=422, media_type="application/json")
+
+    schema_warning = None
+    if old_meta["schema_id"] != new_meta["schema_id"]:
+        schema_warning = f"Minor version difference: {old_meta['schema_id']} vs {new_meta['schema_id']}"
+
+    added, deleted, changed, unchanged_count = _compare_fingerprints(old_fps, new_fps, type_filter)
+
+    # Noise count: not precisely known in two-pass without loading full element lists,
+    # but we can estimate from the product counts
+    noise_excluded = 0
+
+    return _build_diff_response(
+        added, deleted, changed, unchanged_count,
+        old_name, new_name, old_meta, new_meta,
+        schema_warning, time.time() - t_start, "two-pass",
+        noise_excluded=noise_excluded,
+    )

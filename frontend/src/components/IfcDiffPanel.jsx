@@ -120,7 +120,17 @@ export default function IfcDiffPanel({ onClose }) {
               <button onClick={() => { clearDiff(); }} style={resetBtnStyle}>
                 New Comparison
               </button>
+              {diffResult.timing && (
+                <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>
+                  {diffResult.timing.elapsed_s}s ({diffResult.timing.mode})
+                </span>
+              )}
             </div>
+            {diffResult.noiseExcluded > 0 && (
+              <div style={{ ...warningBarStyle, background: "#f0f9ff", borderColor: "#bae6fd", color: "#0369a1" }}>
+                {diffResult.noiseExcluded.toLocaleString()} noise elements excluded (ports, openings)
+              </div>
+            )}
 
             {/* Tabs */}
             <div style={tabBarStyle}>
@@ -456,6 +466,13 @@ function ChangeDetail({ changes }) {
         <div style={{ marginBottom: 8 }}>
           <div style={changeSectionTitle}>Placement</div>
           <div style={{ color: "#f59e0b" }}>Position / rotation changed</div>
+        </div>
+      )}
+
+      {changes.geometry && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={changeSectionTitle}>Geometry</div>
+          <div style={{ color: "#a855f7" }}>3D shape representation changed</div>
         </div>
       )}
 
