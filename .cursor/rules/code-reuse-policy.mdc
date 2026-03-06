@@ -1,0 +1,44 @@
+---
+description: Policy for code reuse and library modification — always prefer existing lib modules, never modify libs without explicit approval
+alwaysApply: true
+---
+
+# Code Reuse & Library Modification Policy
+
+## When building new features or fixing bugs
+
+1. **Search existing library modules first** before writing new code:
+   - Backend: `element_utils.py`, `diff_engine.py`, `ids_service.py`, `edit_session.py`
+   - Frontend: `lib/theme.js`, `lib/shared-styles.js`, `lib/ifc-filter-core.js`, `lib/ifc-viewer-bridge.js`, `lib/ifc-edit-api.js`, `lib/ifc-diff-api.js`, `lib/useIfcFilter.js`, `lib/useIfcHighlighter.js`
+   - Shared components: `DashboardToolbar`, `ClassSummaryTable`, `DiffSummaryView`, `DiffElementList`, `IdsReportWidgets`
+
+2. **Reuse over rewrite** — if a function or style already exists in a lib module, import and use it. Do not duplicate logic.
+
+3. **Extend over fork** — if existing code is 80% of what you need, extend the existing function with parameters rather than creating a parallel version.
+
+## Before modifying any library module
+
+**STOP and present a proposal to the user** that includes:
+
+- **What** will be changed (file, function, interface)
+- **Why** the current code does not meet the requirement
+- **How** you plan to change it (code sketch or description)
+- **Impact** — which other files import or depend on this module, and what breaks or needs updating
+- **Alternatives** considered (e.g., wrapper function, new module, parameter extension)
+
+**Wait for explicit user approval** before making the change.
+
+### What counts as a "library module"
+
+| Layer | Library modules (require approval to modify) |
+|-------|----------------------------------------------|
+| Backend | `element_utils.py`, `diff_engine.py`, `ids_service.py`, `edit_session.py` |
+| Frontend lib | Any file under `frontend/src/lib/` |
+| Shared components | `DashboardToolbar.jsx`, `ClassSummaryTable.jsx`, `DiffSummaryView.jsx`, `DiffElementList.jsx`, `IdsReportWidgets.jsx` |
+
+### What does NOT require approval
+
+- `main.py` route handlers (thin layer — safe to modify)
+- Page-level components (`Dashboard.jsx`, `IfcDiffPanel.jsx`, `IdsValidationReport.jsx`, etc.)
+- Context files, CSS, config files
+- Adding **new** files or modules
