@@ -51,3 +51,6 @@ export {
 } from "./ifc-edit-api";
 
 export { diffIfcFiles } from "./ifc-diff-api";
+
+export { COLORS, SHADOWS, RADII, FONT_SIZES } from "./theme";
+export * from "./shared-styles";

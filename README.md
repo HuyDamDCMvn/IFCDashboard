@@ -78,12 +78,13 @@ A browser-based platform for viewing, analyzing, validating, and editing IFC bui
 ┌──────────────────────────┼──────────────────────────────────┐
 │                     FastAPI Backend                          │
 │  ┌─────────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────┐ │
-│  │ /parse-ifc  │ │ /edit-*  │ │ /build-ids   │ │/diff-ifc │ │
-│  │ /health     │ │ sessions │ │ /parse-ids   │ │          │ │
+│  │element_utils│ │  edit    │ │ ids_service   │ │diff_     │ │
+│  │ /parse-ifc  │ │_session  │ │ /build-ids   │ │engine    │ │
+│  │ /health     │ │ /edit-*  │ │ /parse-ids   │ │/diff-ifc │ │
 │  │             │ │          │ │ /validate-ids│ │          │ │
 │  └──────┬──────┘ └─────┬────┘ └──────┬───────┘ └─────┬────┘ │
-│          │                │                    │             │
-│  ┌───────┴────────────────┴────────────────────┴──────────┐  │
+│         │              │             │               │      │
+│  ┌──────┴──────────────┴─────────────┴───────────────┴───┐  │
 │  │              ifcopenshell + ifctester                   │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -196,8 +197,12 @@ Session closed  ──►  DELETE /api/edit-session/{id}  ──►  memory free
 ```
 IFCDashboard/
 ├── backend/
-│   ├── main.py                         # FastAPI: parse, edit, IDS, diff endpoints
-│   ├── benchmark_diff.py               # Diff algorithm benchmark suite
+│   ├── main.py                         # FastAPI route layer (thin — delegates to modules)
+│   ├── element_utils.py                # IFC element inspection: psets, materials, spatial info
+│   ├── diff_engine.py                  # Model comparison: fingerprint, one/two-pass diff
+│   ├── ids_service.py                  # IDS build / parse / validate logic
+│   ├── edit_session.py                 # Stateful IFC edit session manager
+│   ├── benchmark_diff.py              # Diff algorithm benchmark suite
 │   └── requirements.txt
 ├── frontend/
 │   ├── public/
@@ -207,13 +212,18 @@ IFCDashboard/
 │   └── src/
 │       ├── components/
 │       │   ├── IfcViewer.jsx           # 3D viewer (That Open engine)
-│       │   ├── IfcDiffPanel.jsx        # IFC diff comparison UI
-│       │   ├── Dashboard.jsx           # Charts, stats, element table
+│       │   ├── Dashboard.jsx           # Charts, stats, grid layout orchestrator
+│       │   ├── DashboardToolbar.jsx    # Filter dropdowns, bar size, reset controls
+│       │   ├── ClassSummaryTable.jsx   # IFC class summary table with progress bars
 │       │   ├── DashboardPanel.jsx      # Collapsible panel wrapper
 │       │   ├── ElementTable.jsx        # Searchable element table
 │       │   ├── SelectedElement.jsx     # Selected element properties
 │       │   ├── ModelManager.jsx        # Multi-model sidebar
 │       │   ├── StatCard.jsx            # Dashboard stat cards
+│       │   ├── IfcDiffPanel.jsx        # IFC diff comparison modal
+│       │   ├── diff/
+│       │   │   ├── DiffSummaryView.jsx # Diff summary charts (pie + bar)
+│       │   │   └── DiffElementList.jsx # Diff element list with change details
 │       │   ├── ifc-editor/
 │       │   │   ├── PropertyEditor.jsx  # Modal: edit attributes + psets
 │       │   │   ├── AttributeEditor.jsx # Name/Description/Type fields
@@ -228,7 +238,8 @@ IFCDashboard/
 │       │       ├── IdsInfoPanel.jsx    # IDS metadata panel
 │       │       ├── IdsXmlPreview.jsx   # XML preview
 │       │       ├── IdsTemplates.jsx    # Built-in templates
-│       │       └── IdsValidationReport.jsx  # Validation results
+│       │       ├── IdsValidationReport.jsx  # Validation results
+│       │       └── IdsReportWidgets.jsx     # Donut chart, compliance bar, summary cards
 │       ├── contexts/
 │       │   ├── SelectionContext.jsx     # Selection, filter, isolation state
 │       │   ├── ModelRegistryContext.jsx # Loaded models, federation merge
@@ -236,20 +247,39 @@ IFCDashboard/
 │       │   ├── IfcDiffContext.jsx       # Diff state management
 │       │   └── IdsBuilderContext.jsx    # IDS document state
 │       ├── lib/
-│       │   ├── ifc-filter-core.js      # Pure JS: filtering, color maps
-│       │   ├── ifc-viewer-bridge.js    # That Open highlight/isolate API
-│       │   ├── ifc-edit-api.js         # HTTP client for edit endpoints
-│       │   ├── ifc-diff-api.js         # HTTP client for diff endpoint
-│       │   ├── useIfcFilter.js         # React hook: filter logic
-│       │   ├── useIfcHighlighter.js    # React hook: 3D highlight sync
-│       │   ├── ids-constants.js        # IFC entity/type constants for IDS
-│       │   └── index.js                # Public API re-exports
-│       ├── App.jsx                     # Root layout, providers, header
-│       ├── main.jsx                    # React entry point
-│       └── index.css                   # Global styles
-├── TestIFC/                            # buildingSMART sample IFC files
+│       │   ├── theme.js               # Single source of truth: colors, shadows, radii, fonts
+│       │   ├── shared-styles.js       # Reusable style objects (modal, badge, dropdown, etc.)
+│       │   ├── ifc-filter-core.js     # Pure JS: filtering, color maps
+│       │   ├── ifc-viewer-bridge.js   # That Open highlight/isolate API
+│       │   ├── ifc-edit-api.js        # HTTP client for edit endpoints
+│       │   ├── ifc-diff-api.js        # HTTP client for diff endpoint
+│       │   ├── useIfcFilter.js        # React hook: filter logic
+│       │   ├── useIfcHighlighter.js   # React hook: 3D highlight sync
+│       │   ├── ids-constants.js       # IFC entity/type constants for IDS
+│       │   └── index.js              # Public API re-exports
+│       ├── App.jsx                    # Root layout, providers, header
+│       ├── main.jsx                   # React entry point
+│       └── index.css                  # Global styles
+├── TestIFC/                           # buildingSMART sample IFC files
 └── README.md
 ```
+
+### Backend Modules
+
+| Module | Responsibility |
+|--------|---------------|
+| `main.py` | Thin route layer — receives HTTP requests, delegates to specialized modules |
+| `element_utils.py` | Pure functions for IFC element inspection (psets, materials, spatial info, type normalization) |
+| `diff_engine.py` | Model comparison engine — fingerprint extraction, one-pass and two-pass diff, shared `_compare_psets()` |
+| `ids_service.py` | IDS build/parse/validate — converts between JSON and ifctester objects |
+| `edit_session.py` | `SessionManager` class — holds IFC models in memory for stateful editing |
+
+### Frontend Design System
+
+| Module | Responsibility |
+|--------|---------------|
+| `theme.js` | Single source of truth for `COLORS`, `PALETTE`, `SHADOWS`, `RADII`, `FONT_SIZES` |
+| `shared-styles.js` | Reusable style objects: `modalOverlay`, `dropdownMenu`, `badge`, `pillButton`, `tooltipBox`, etc. |
 
 ---
 

@@ -1,20 +1,13 @@
 /**
- * ifc-filter-core.js — Pure JS, zero dependencies.
+ * ifc-filter-core.js — Pure JS, minimal dependencies.
  *
  * Provides color mapping, element filtering, color-map building,
  * and data summarisation utilities for IFC element datasets.
  */
 
-// ─── Color Palette ───────────────────────────────────────────────
+import { PALETTE, ACTIVE_COLOR } from "./theme";
 
-export const PALETTE = [
-  "#4f46e5", "#06b6d4", "#10b981", "#f59e0b", "#ef4444",
-  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1",
-  "#84cc16", "#e11d48", "#0ea5e9", "#d946ef", "#22c55e",
-  "#a855f7", "#f43f5e", "#3b82f6", "#eab308", "#64748b",
-];
-
-export const ACTIVE_COLOR = "#ff6600";
+export { PALETTE, ACTIVE_COLOR };
 
 /**
  * Build a deterministic color map from a list of IFC class names.

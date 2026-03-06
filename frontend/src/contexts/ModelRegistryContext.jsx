@@ -1,13 +1,9 @@
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import { PALETTE } from "../lib/theme";
 
 const ModelRegistryContext = createContext(null);
 
 let _nextOrder = 0;
-
-const MODEL_COLORS = [
-  "#4f46e5", "#06b6d4", "#10b981", "#f59e0b", "#ef4444",
-  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1",
-];
 
 export function ModelRegistryProvider({ children }) {
   const [models, setModels] = useState(new Map());
@@ -26,7 +22,7 @@ export function ModelRegistryProvider({ children }) {
         fileName,
         file,
         discipline: guessDiscipline(fileName),
-        color: MODEL_COLORS[order % MODEL_COLORS.length],
+        color: PALETTE[order % PALETTE.length],
         visible: true,
         dashboardData,
         loadedIn3D: false,
